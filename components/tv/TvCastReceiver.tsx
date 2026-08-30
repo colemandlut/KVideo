@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useIsTvLike } from '@/lib/hooks/mobile/useDeviceDetection';
 
 const POLL_INTERVAL_MS = 5000;
+// 6 skipped ticks -> roughly one probe every 30s while logged out.
+const TICKS_WHILE_UNAUTHENTICATED = 6;
 
 interface CastCommand {
   id: string;
@@ -49,23 +51,40 @@ export function TvCastReceiver() {
     hasPolledOnceRef.current = false;
 
     let intervalId: ReturnType<typeof setInterval> | null = null;
+    // Poll every tick normally; while unauthenticated, only every 6th tick.
+    let skipTicks = 0;
 
     const poll = async () => {
       if (document.visibilityState !== 'visible') {
         return;
       }
 
+      if (skipTicks > 0) {
+        skipTicks -= 1;
+        return;
+      }
+
       try {
         const res = await fetch('/api/cast');
 
-        if (res.status === 401 || res.status === 503) {
-          console.info(
-            `[TvCastReceiver] Cast endpoint returned ${res.status}; stopping polling for this session.`
-          );
+        // 503 means Upstash is not configured. That cannot change without a
+        // redeploy, which reloads the page anyway, so stop for good.
+        if (res.status === 503) {
+          console.info('[TvCastReceiver] Cast storage is not configured; stopping.');
           if (intervalId !== null) {
             clearInterval(intervalId);
             intervalId = null;
           }
+          return;
+        }
+
+        // 401 just means nobody has logged in yet. This receiver is mounted
+        // outside the password gate, so on a cold start it polls before the
+        // user has typed the password. Backing off instead of stopping is what
+        // lets casting start working the moment they log in - stopping here
+        // left the feature dead until the whole app was restarted.
+        if (res.status === 401) {
+          skipTicks = TICKS_WHILE_UNAUTHENTICATED;
           return;
         }
 
