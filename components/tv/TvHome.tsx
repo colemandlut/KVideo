@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TvFocusProvider, useTvFocus } from '@/lib/tv/TvFocusProvider';
 import { useTvKeys } from '@/lib/tv/useTvKeys';
@@ -63,6 +63,15 @@ function TvHomeContent() {
   const { pos } = useTvFocus();
   useTvKeys(true);
 
+  // Derived, monotonically-increasing high-water mark of the furthest row
+  // reached. Updated during render (not in an effect) so the set of loaded
+  // rows only ever grows within a mount - moving focus back up must not
+  // unmount already-loaded rows and lose their fetched data.
+  const [maxRowReached, setMaxRowReached] = useState(pos.rowIndex);
+  if (pos.rowIndex > maxRowReached) {
+    setMaxRowReached(pos.rowIndex);
+  }
+
   const handleSelect = useCallback((movie: TvMovie) => {
     router.push(`/?q=${encodeURIComponent(movie.title)}`);
   }, [router]);
@@ -86,7 +95,7 @@ function TvHomeContent() {
             title={category.title}
             tagId={category.id}
             tags={TAGS}
-            shouldLoad={rowIndex <= Math.max(2, pos.rowIndex + 1)}
+            shouldLoad={rowIndex <= Math.max(2, maxRowReached + 1)}
             onSelect={handleSelect}
           />
         );
