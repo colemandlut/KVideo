@@ -57,6 +57,8 @@ export function useDesktopShortcuts({
 
             switch (e.key.toLowerCase()) {
                 case ' ':
+                // Android TV maps the D-pad centre button to Enter.
+                case 'enter':
                 case 'k':
                     e.preventDefault();
                     togglePlay();
