@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useHistory } from '@/lib/store/history-store';
 import { useTvFocus } from '@/lib/tv/TvFocusProvider';
@@ -12,19 +12,88 @@ interface TvHistoryRowProps {
 }
 
 const MAX_ITEMS = 20;
+const LONG_PRESS_MS = 800;
 
 interface TvHistoryCardProps {
   item: VideoHistoryItem;
   onSelect: (item: VideoHistoryItem) => void;
+  onDelete: (item: VideoHistoryItem) => void;
   setRef: (el: HTMLButtonElement | null) => void;
 }
 
 /**
  * One card owns its own image-error flag so a single dead scraper-site
  * poster only blanks out that card, not every card in the row.
+ *
+ * The card also takes over the Enter key itself (rather than letting the
+ * native <button> click-on-keydown behaviour run) so that holding OK can
+ * mean "delete" instead of "play". The Android TV shell maps the D-pad
+ * centre button to KEYCODE_ENTER and dispatches both ACTION_DOWN and
+ * ACTION_UP, so keydown/keyup timing is reliable here. All of the
+ * setState calls below happen inside event handlers or a setTimeout
+ * callback, never synchronously in a useEffect body.
  */
-function TvHistoryCard({ item, onSelect, setRef }: TvHistoryCardProps) {
+function TvHistoryCard({ item, onSelect, onDelete, setRef }: TvHistoryCardProps) {
   const [imageError, setImageError] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const [isPressing, setIsPressing] = useState(false);
+  const [pressToken, setPressToken] = useState(0);
+
+  // Timer for the pending long-press delete, and a flag so the keyup that
+  // follows a fired long-press doesn't also trigger a short-press select.
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFiredRef = useRef(false);
+
+  const clearPressTimer = () => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  // Never leave a timer running past the card's lifetime.
+  useEffect(() => clearPressTimer, []);
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== 'Enter') return;
+
+    // Stop the native click-on-keydown behaviour every time Enter fires for
+    // this button, including auto-repeats - otherwise a held key would keep
+    // re-triggering play on every repeat while the delete timer is running.
+    event.preventDefault();
+
+    if (event.repeat) return; // Android auto-repeat while held - nothing new to start
+
+    longPressFiredRef.current = false;
+    setIsPressing(true);
+    setPressToken((token) => token + 1);
+
+    clearPressTimer();
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      longPressFiredRef.current = true;
+      setIsPressing(false);
+      onDelete(item);
+    }, LONG_PRESS_MS);
+  };
+
+  const handleKeyUp = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== 'Enter') return;
+
+    const wasLongPress = longPressFiredRef.current;
+    clearPressTimer();
+    setIsPressing(false);
+
+    if (!wasLongPress) {
+      onSelect(item);
+    }
+  };
+
+  const handleBlur = () => {
+    clearPressTimer();
+    setIsPressing(false);
+    setIsFocused(false);
+  };
 
   const showEpisode = item.episodes && item.episodes.length > 1;
   const showProgress = item.duration > 0;
@@ -39,6 +108,10 @@ function TvHistoryCard({ item, onSelect, setRef }: TvHistoryCardProps) {
       tabIndex={-1}
       className="tv-focusable flex-shrink-0 w-[148px] text-left"
       onClick={() => onSelect(item)}
+      onKeyDown={handleKeyDown}
+      onKeyUp={handleKeyUp}
+      onFocus={() => setIsFocused(true)}
+      onBlur={handleBlur}
     >
       <div className="relative w-[148px] h-[208px] rounded-[10px] overflow-hidden bg-[#252b36]">
         {item.poster && !imageError ? (
@@ -56,12 +129,22 @@ function TvHistoryCard({ item, onSelect, setRef }: TvHistoryCardProps) {
             第 {item.episodeIndex + 1} 集
           </span>
         ) : null}
+        {isFocused ? (
+          <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/70 text-[13px] text-[#e8eaed]">
+            长按 OK 删除
+          </span>
+        ) : null}
         {showProgress ? (
           <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-black/40">
             <div
               className="h-full bg-[#3b82f6]"
               style={{ width: `${progressPct}%` }}
             />
+          </div>
+        ) : null}
+        {isPressing ? (
+          <div className="absolute bottom-0 left-0 right-0 h-[4px] bg-black/40">
+            <div key={pressToken} className="tv-history-delete-progress h-full bg-red-500" />
           </div>
         ) : null}
       </div>
@@ -73,7 +156,7 @@ function TvHistoryCard({ item, onSelect, setRef }: TvHistoryCardProps) {
 export function TvHistoryRow({ id, rowIndex }: TvHistoryRowProps) {
   const router = useRouter();
   const { registerRow, unregisterRow, setItemElement } = useTvFocus();
-  const { viewingHistory } = useHistory(false);
+  const { viewingHistory, removeFromHistory } = useHistory(false);
 
   // viewingHistory is already kept sorted newest-first by the store
   // (addToHistory unshifts, migrateHistory sorts descending by timestamp),
@@ -99,6 +182,10 @@ export function TvHistoryRow({ id, rowIndex }: TvHistoryRowProps) {
     router.push(`/player?${params.toString()}`);
   };
 
+  const handleDelete = (item: VideoHistoryItem) => {
+    removeFromHistory(item.showIdentifier);
+  };
+
   return (
     <section>
       <h2 className="tv-row-title">继续观看</h2>
@@ -108,6 +195,7 @@ export function TvHistoryRow({ id, rowIndex }: TvHistoryRowProps) {
             key={item.showIdentifier}
             item={item}
             onSelect={handleSelect}
+            onDelete={handleDelete}
             setRef={(el) => setItemElement(id, index, el)}
           />
         ))}

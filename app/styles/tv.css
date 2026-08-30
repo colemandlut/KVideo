@@ -47,3 +47,20 @@
 .tv-row-strip::-webkit-scrollbar {
   display: none;
 }
+
+/* Fills over the 800ms long-press-to-delete hold on a TV history card.
+   Restarted per press via a `key` change on the element (see TvHistoryRow),
+   not by re-triggering React state every frame. */
+@keyframes tv-history-delete-progress {
+  from {
+    width: 0%;
+  }
+  to {
+    width: 100%;
+  }
+}
+
+.tv-history-delete-progress {
+  width: 0%;
+  animation: tv-history-delete-progress 800ms linear forwards;
+}
