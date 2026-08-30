@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTvFocus } from '@/lib/tv/TvFocusProvider';
+import { getLatencyInfo } from '@/lib/utils/latency';
 import type { Video } from '@/lib/types';
 
 const COLUMNS = 5;
@@ -41,31 +42,47 @@ function BackRow({ onBack }: { onBack: () => void }) {
 interface TvResultRowProps {
   rowIndex: number;
   videos: Video[];
+  latencies: Record<string, number>;
   onSelect: (video: Video) => void;
 }
 
-function TvResultRow({ rowIndex, videos, onSelect }: TvResultRowProps) {
+function TvResultRow({ rowIndex, videos, latencies, onSelect }: TvResultRowProps) {
   const { setItemElement } = useTvFocus();
   const id = `result-${rowIndex}`;
   useRowRegistration(id, rowIndex, videos.length, true);
 
   return (
     <div className="tv-row-strip">
-      {videos.map((video, index) => (
-        <button
-          key={`${video.source}-${video.vod_id}`}
-          ref={(el) => setItemElement(id, index, el)}
-          type="button"
-          tabIndex={-1}
-          className="tv-focusable flex-shrink-0 w-[148px] h-[104px] rounded-[10px] bg-[#252b36] px-3 py-2 text-left"
-          onClick={() => onSelect(video)}
-        >
-          <span className="block text-[15px] leading-tight line-clamp-3">{video.vod_name}</span>
-          <span className="block mt-1 text-[13px] text-[#9aa0a6] line-clamp-1">
-            {video.sourceName || video.source}
-          </span>
-        </button>
-      ))}
+      {videos.map((video, index) => {
+        const latency = latencies[video.source] ?? video.latency;
+        const latencyInfo = latency !== undefined ? getLatencyInfo(latency) : null;
+
+        return (
+          <button
+            key={`${video.source}-${video.vod_id}`}
+            ref={(el) => setItemElement(id, index, el)}
+            type="button"
+            tabIndex={-1}
+            className="tv-focusable flex-shrink-0 w-[148px] h-[104px] rounded-[10px] bg-[#252b36] px-3 py-2 text-left"
+            onClick={() => onSelect(video)}
+          >
+            <span className="block text-[15px] leading-tight line-clamp-3">{video.vod_name}</span>
+            <span className="flex items-center justify-between gap-1 mt-1">
+              <span className="text-[13px] text-[#9aa0a6] line-clamp-1 min-w-0 truncate">
+                {video.sourceName || video.source}
+              </span>
+              {latencyInfo && (
+                <span
+                  className="text-[13px] font-mono flex-shrink-0"
+                  style={{ color: latencyInfo.color }}
+                >
+                  {latencyInfo.label}
+                </span>
+              )}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -74,10 +91,11 @@ interface TvSearchResultsProps {
   query: string;
   loading: boolean;
   results: Video[];
+  latencies: Record<string, number>;
   onBack: () => void;
 }
 
-export function TvSearchResults({ query, loading, results, onBack }: TvSearchResultsProps) {
+export function TvSearchResults({ query, loading, results, latencies, onBack }: TvSearchResultsProps) {
   const router = useRouter();
 
   const chunks = useMemo(() => {
@@ -108,6 +126,7 @@ export function TvSearchResults({ query, loading, results, onBack }: TvSearchRes
           key={index}
           rowIndex={index + 1}
           videos={videos}
+          latencies={latencies}
           onSelect={handleSelect}
         />
       ))}

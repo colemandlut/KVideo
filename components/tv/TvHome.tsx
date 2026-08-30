@@ -63,11 +63,12 @@ export interface TvHomeProps {
   hasSearched: boolean;
   loading: boolean;
   results: Video[];
+  latencies: Record<string, number>;
   onSearch: (query: string) => void;
   onReset: () => void;
 }
 
-function TvHomeContent({ query, hasSearched, loading, results, onSearch, onReset }: TvHomeProps) {
+function TvHomeContent({ query, hasSearched, loading, results, latencies, onSearch, onReset }: TvHomeProps) {
   const router = useRouter();
   const { pos, setPos } = useTvFocus();
   useTvKeys(true);
@@ -181,7 +182,7 @@ function TvHomeContent({ query, hasSearched, loading, results, onSearch, onReset
   if (hasSearched) {
     return (
       <div className="tv-root min-h-screen bg-[#0f1218] text-[#e8eaed]">
-        <TvSearchResults query={query} loading={loading} results={results} onBack={onReset} />
+        <TvSearchResults query={query} loading={loading} results={results} latencies={latencies} onBack={onReset} />
       </div>
     );
   }
