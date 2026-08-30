@@ -123,7 +123,34 @@ export function TvCastReceiver() {
           params.set('t', String(command.t));
         }
 
-        router.push(`/player?${params.toString()}`);
+        const url = `/player?${params.toString()}`;
+
+        // Casting the episode that is already on screen only changes `t`, and a
+        // route change alone will not move playback: useVideoPlayer's effect is
+        // keyed on [videoId, source], neither of which changed, and `t` is only
+        // read once when the player mounts. So seek the element directly and
+        // update the URL in place, which is also what makes a later reload
+        // resume from the right spot.
+        const current = new URLSearchParams(window.location.search);
+        const isSameEpisode =
+          window.location.pathname === '/player' &&
+          current.get('id') === command.id &&
+          current.get('source') === command.source &&
+          (current.get('episode') ?? '0') === String(command.episode);
+
+        if (isSameEpisode) {
+          const video = document.querySelector('video');
+          if (video) {
+            video.currentTime = command.t;
+            void video.play().catch(() => {
+              // Autoplay can be refused; the seek still happened.
+            });
+          }
+          router.replace(url);
+          return;
+        }
+
+        router.push(url);
       } catch {
         // Transient network failure - keep polling, next tick may succeed.
       }
