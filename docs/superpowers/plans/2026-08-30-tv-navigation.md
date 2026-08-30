@@ -913,3 +913,19 @@ git commit -m "feat(tv): route the home page to the TV screen on TV-like devices
 - `npm run pages:build` 退出码 0
 - 960×540 视口下遥控器按键行为符合 Task 8 Step 3 的全部条目
 - 375×812 视口下首页与改动前完全一致
+
+---
+
+## 执行期间的偏离记录
+
+计划执行时发现并处理的问题，记在这里以免下次重蹈覆辙。
+
+**新增 Task 7b（电视版搜索结果页）。** 原计划漏了一个洞：定义了首页长什么样、焦点怎么走，却没定义「选中一部片之后会怎样」。实现到 Task 7 时才发现按 Enter 完全没反应——`app/page.tsx` 的提前返回让搜索结果 JSX 永远到不了，而 `useHomePage` 读 `?q=` 的 effect 只在挂载时跑一次，同路由 `router.push` 不会重新挂载。修法是把搜索留在 React state 里而不是 URL 里，并新增 `TvSearchResults`。
+
+**焦点注册的单一所有权。** `TvRowLoaded` 和它渲染的 `TvRowSkeleton` 原本注册同一个 id，子组件的 effect 清理会删掉父组件的注册项（连同 ref 刚写入的元素表）。当时能工作纯属巧合——任何 `rows` 变化都会重渲染所有行并重新触发 ref 回调补回来。已改为「一个 id 只有一个注册所有者」，并在代码里留了注释说明。
+
+**懒加载阈值必须单调。** 用实时的 `pos.rowIndex` 算 `shouldLoad` 会在焦点回上时卸载已加载的行、丢弃数据并重新请求豆瓣。改为高水位标记。
+
+**海报图片不要再包一层代理。** `/api/douban/recommend` 返回的 `cover` 已经是 `/api/douban/image?url=...`，再包一次会得到 502。
+
+**性能实测。** dev 模式下每次方向键约 936ms，生产构建下约 40ms。dev 的数字不能用来判断。所有行共用同一个 context value，`pos` 一变全部重渲染——在更慢的电视硬件上可能仍需拆分 context，待真机验证。
