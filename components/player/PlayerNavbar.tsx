@@ -134,7 +134,14 @@ export function PlayerNavbar({ isPremium }: { isPremium?: boolean }) {
                                 title="投屏到电视"
                             >
                                 <Icons.Cast size={20} />
-                                <span className="hidden sm:inline">{castLabel}</span>
+                                {/* Icon-only at rest on phones, matching 返回. But the
+                                    transient 已投屏 / 投屏失败 states are the only feedback
+                                    this button gives, and a phone is where casting is
+                                    actually used - hiding them there made every tap look
+                                    like nothing happened. */}
+                                <span className={castState === 'idle' ? 'hidden sm:inline' : 'inline'}>
+                                    {castLabel}
+                                </span>
                             </Button>
                         )}
                     </div>
