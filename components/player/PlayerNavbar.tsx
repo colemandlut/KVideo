@@ -1,4 +1,5 @@
-import { useRouter } from 'next/navigation';
+import { useEffect, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Button } from '@/components/ui/Button';
@@ -6,10 +7,96 @@ import { ThemeSwitcher } from '@/components/ThemeSwitcher';
 import { useSiteIcon } from '@/components/SiteIconProvider';
 import { Icons } from '@/components/ui/Icon';
 import { siteConfig } from '@/lib/config/site-config';
+import { useIsTvLike } from '@/lib/hooks/mobile/useDeviceDetection';
+
+type CastState = 'idle' | 'sending' | 'sent' | 'error';
+
+const CAST_FEEDBACK_MS = 2000;
 
 export function PlayerNavbar({ isPremium }: { isPremium?: boolean }) {
     const router = useRouter();
+    const searchParams = useSearchParams();
     const siteIconSrc = useSiteIcon();
+    const isTvLike = useIsTvLike();
+
+    const [castAvailable, setCastAvailable] = useState(true);
+    const [castState, setCastState] = useState<CastState>('idle');
+    const castResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Probe once on mount: if server-side cast isn't configured (503) or the
+    // viewer has no session (401), hide the button permanently for this
+    // mount instead of showing something that will always fail.
+    useEffect(() => {
+        if (isTvLike) {
+            return;
+        }
+
+        let cancelled = false;
+
+        (async () => {
+            try {
+                const res = await fetch('/api/cast');
+                if (cancelled) {
+                    return;
+                }
+                if (res.status === 401 || res.status === 503) {
+                    setCastAvailable(false);
+                }
+            } catch {
+                if (!cancelled) {
+                    setCastAvailable(false);
+                }
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [isTvLike]);
+
+    useEffect(() => {
+        return () => {
+            if (castResetTimeoutRef.current) {
+                clearTimeout(castResetTimeoutRef.current);
+            }
+        };
+    }, []);
+
+    const handleCast = async () => {
+        const id = searchParams.get('id');
+        const source = searchParams.get('source');
+        const title = searchParams.get('title') ?? '';
+        const episode = Number(searchParams.get('episode') ?? '0');
+
+        if (!id || !source) {
+            return;
+        }
+
+        const t = Math.floor(document.querySelector('video')?.currentTime ?? 0);
+
+        setCastState('sending');
+
+        try {
+            const res = await fetch('/api/cast', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id, source, title, episode, t }),
+            });
+
+            setCastState(res.ok ? 'sent' : 'error');
+        } catch {
+            setCastState('error');
+        }
+
+        if (castResetTimeoutRef.current) {
+            clearTimeout(castResetTimeoutRef.current);
+        }
+        castResetTimeoutRef.current = setTimeout(() => setCastState('idle'), CAST_FEEDBACK_MS);
+    };
+
+    const showCastButton = !isTvLike && castAvailable;
+    const castLabel =
+        castState === 'sent' ? '已投屏' : castState === 'error' ? '投屏失败' : '投屏';
 
     return (
         <nav className="sticky top-0 z-50 pt-4 pb-2 px-4" style={{ transform: 'translateZ(0)' }}>
@@ -38,6 +125,18 @@ export function PlayerNavbar({ isPremium }: { isPremium?: boolean }) {
                             <Icons.ChevronLeft size={20} />
                             <span className="hidden sm:inline">返回</span>
                         </Button>
+                        {showCastButton && (
+                            <Button
+                                variant="secondary"
+                                onClick={handleCast}
+                                disabled={castState === 'sending'}
+                                className="flex items-center gap-2"
+                                title="投屏到电视"
+                            >
+                                <Icons.Cast size={20} />
+                                <span className="hidden sm:inline">{castLabel}</span>
+                            </Button>
+                        )}
                     </div>
                     <div className="flex items-center gap-3">
                         <Link
