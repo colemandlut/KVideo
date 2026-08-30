@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef } from 'react';
+import { forwardRef, useState } from 'react';
 
 export interface TvMovie {
   id: string;
@@ -17,6 +17,8 @@ interface TvPosterCardProps {
 
 export const TvPosterCard = forwardRef<HTMLButtonElement, TvPosterCardProps>(
   function TvPosterCard({ movie, onSelect }, ref) {
+    const [imageError, setImageError] = useState(false);
+
     return (
       <button
         ref={ref}
@@ -26,13 +28,14 @@ export const TvPosterCard = forwardRef<HTMLButtonElement, TvPosterCardProps>(
         onClick={() => onSelect(movie)}
       >
         <div className="relative w-[148px] h-[208px] rounded-[10px] overflow-hidden bg-[#252b36]">
-          {movie.cover ? (
+          {movie.cover && !imageError ? (
             /* eslint-disable-next-line @next/next/no-img-element */
             <img
-              src={`/api/douban/image?url=${encodeURIComponent(movie.cover)}`}
+              src={movie.cover}
               alt={movie.title}
               className="w-full h-full object-cover"
               loading="lazy"
+              onError={() => setImageError(true)}
             />
           ) : null}
           {movie.rate ? (
