@@ -79,7 +79,11 @@ export function readTvEnvironment() {
         width,
         height: window.innerHeight,
         hasBridge,
-        isTvLike: hasBridge || isTvUA || (isAndroidUA && width >= 1280),
+        // Measured on a real Android TV: 960x540 CSS px at dpr 2, maxTouchPoints 0.
+        // A width threshold alone misses it, so the reliable signal for a set-top
+        // box is an Android user agent that reports no touch points at all -
+        // phones and tablets always report at least one.
+        isTvLike: hasBridge || isTvUA || (isAndroidUA && navigator.maxTouchPoints === 0 && width >= 900),
     };
 }
 
@@ -95,24 +99,5 @@ export function useIsTvLike() {
         },
         () => readTvEnvironment().isTvLike,
         () => false
-    );
-}
-
-/**
- * TEMPORARY: single-line environment summary rendered on the player so the
- * actual runtime values can be read off a TV screen. Returns a string because
- * useSyncExternalStore requires a stable snapshot.
- */
-export function useTvEnvironmentLabel() {
-    return useSyncExternalStore(
-        (onChange) => {
-            window.addEventListener('resize', onChange);
-            return () => window.removeEventListener('resize', onChange);
-        },
-        () => {
-            const e = readTvEnvironment();
-            return `tv=${e.isTvLike ? 'Y' : 'N'} bridge=${e.hasBridge ? 'Y' : 'N'} androidUA=${e.isAndroidUA ? 'Y' : 'N'} ${e.width}x${e.height} dpr=${window.devicePixelRatio} touch=${navigator.maxTouchPoints}`;
-        },
-        () => ''
     );
 }
