@@ -30,6 +30,16 @@ test('changing row lands on the start of that row', () => {
   assert.deepEqual(moveFocus(rows, { rowIndex: 1, itemIndex: 5 }, 'up'), { rowIndex: 0, itemIndex: 0 });
 });
 
+test('grid rows keep the column, clamped to the shorter row', () => {
+  const gridRows: TvRowMeta[] = [
+    { id: 'g0', length: 5, keepColumn: true },
+    { id: 'g1', length: 5, keepColumn: true },
+    { id: 'g2', length: 2, keepColumn: true },
+  ];
+  assert.deepEqual(moveFocus(gridRows, { rowIndex: 0, itemIndex: 3 }, 'down'), { rowIndex: 1, itemIndex: 3 });
+  assert.deepEqual(moveFocus(gridRows, { rowIndex: 1, itemIndex: 3 }, 'down'), { rowIndex: 2, itemIndex: 1 });
+});
+
 test('up from the first row stays put', () => {
   assert.deepEqual(moveFocus(rows, { rowIndex: 0, itemIndex: 1 }, 'up'), { rowIndex: 0, itemIndex: 1 });
 });

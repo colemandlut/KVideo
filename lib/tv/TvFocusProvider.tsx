@@ -6,6 +6,7 @@ import { clampFocus, type TvFocusPos, type TvRowMeta } from './focus-model';
 interface RowRegistration {
   rowIndex: number;
   length: number;
+  keepColumn: boolean;
   elements: (HTMLElement | null)[];
 }
 
@@ -13,7 +14,7 @@ interface TvFocusContextValue {
   rows: TvRowMeta[];
   pos: TvFocusPos;
   setPos: (next: TvFocusPos) => void;
-  registerRow: (id: string, rowIndex: number, length: number) => void;
+  registerRow: (id: string, rowIndex: number, length: number, keepColumn?: boolean) => void;
   unregisterRow: (id: string) => void;
   setItemElement: (id: string, itemIndex: number, el: HTMLElement | null) => void;
   getElement: (pos: TvFocusPos) => HTMLElement | null;
@@ -28,14 +29,19 @@ export function TvFocusProvider({ children }: { children: React.ReactNode }) {
 
   const rebuildRows = useCallback(() => {
     const ordered = [...registry.current.entries()].sort((a, b) => a[1].rowIndex - b[1].rowIndex);
-    setRows(ordered.map(([id, row]) => ({ id, length: row.length })));
+    setRows(ordered.map(([id, row]) => ({ id, length: row.length, keepColumn: row.keepColumn })));
   }, []);
 
-  const registerRow = useCallback((id: string, rowIndex: number, length: number) => {
+  const registerRow = useCallback((id: string, rowIndex: number, length: number, keepColumn = false) => {
     const existing = registry.current.get(id);
-    if (existing && existing.rowIndex === rowIndex && existing.length === length) return;
+    if (
+      existing
+      && existing.rowIndex === rowIndex
+      && existing.length === length
+      && existing.keepColumn === keepColumn
+    ) return;
     const elements = existing ? existing.elements.slice(0, length) : [];
-    registry.current.set(id, { rowIndex, length, elements });
+    registry.current.set(id, { rowIndex, length, keepColumn, elements });
     rebuildRows();
   }, [rebuildRows]);
 
