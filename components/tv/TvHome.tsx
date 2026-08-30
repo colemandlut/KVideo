@@ -6,7 +6,9 @@ import { TvFocusProvider, useTvFocus } from '@/lib/tv/TvFocusProvider';
 import { useTvKeys } from '@/lib/tv/useTvKeys';
 import { TvRow } from './TvRow';
 import { TvRecommendRow } from './TvRecommendRow';
+import { TvSearchResults } from './TvSearchResults';
 import type { TvMovie } from './TvPosterCard';
+import type { Video } from '@/lib/types';
 
 const TV_CATEGORIES = [
   { id: 'popular', title: '热门', value: '热门' },
@@ -58,7 +60,16 @@ function TopbarRow({ onFavorites, onSettings }: TopbarRowProps) {
   );
 }
 
-function TvHomeContent() {
+export interface TvHomeProps {
+  query: string;
+  hasSearched: boolean;
+  loading: boolean;
+  results: Video[];
+  onSearch: (query: string) => void;
+  onReset: () => void;
+}
+
+function TvHomeContent({ query, hasSearched, loading, results, onSearch, onReset }: TvHomeProps) {
   const router = useRouter();
   const { pos } = useTvFocus();
   useTvKeys(true);
@@ -73,8 +84,16 @@ function TvHomeContent() {
   }
 
   const handleSelect = useCallback((movie: TvMovie) => {
-    router.push(`/?q=${encodeURIComponent(movie.title)}`);
-  }, [router]);
+    onSearch(movie.title);
+  }, [onSearch]);
+
+  if (hasSearched) {
+    return (
+      <div className="tv-root min-h-screen bg-[#0f1218] text-[#e8eaed]">
+        <TvSearchResults query={query} loading={loading} results={results} onBack={onReset} />
+      </div>
+    );
+  }
 
   return (
     <div className="tv-root min-h-screen bg-[#0f1218] text-[#e8eaed]">
@@ -104,10 +123,10 @@ function TvHomeContent() {
   );
 }
 
-export function TvHome() {
+export function TvHome(props: TvHomeProps) {
   return (
     <TvFocusProvider>
-      <TvHomeContent />
+      <TvHomeContent {...props} />
     </TvFocusProvider>
   );
 }
