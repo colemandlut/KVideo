@@ -9,6 +9,8 @@ import { Navbar } from '@/components/layout/Navbar';
 import { SearchResults } from '@/components/home/SearchResults';
 import { useHomePage } from '@/lib/hooks/useHomePage';
 import { useLatencyPing } from '@/lib/hooks/useLatencyPing';
+import { useIsTvLike } from '@/lib/hooks/mobile/useDeviceDetection';
+import { TvHome } from '@/components/tv/TvHome';
 
 function HomePage() {
   const {
@@ -36,6 +38,21 @@ function HomePage() {
     sourceUrls,
     enabled: hasSearched && results.length > 0,
   });
+
+  const isTvLike = useIsTvLike();
+
+  if (isTvLike) {
+    return (
+      <TvHome
+        query={query}
+        hasSearched={hasSearched}
+        loading={loading}
+        results={results}
+        onSearch={handleSearch}
+        onReset={handleReset}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen">
