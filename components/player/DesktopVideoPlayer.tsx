@@ -12,7 +12,7 @@ import { DesktopOverlayWrapper } from './desktop/DesktopOverlayWrapper';
 import { DanmakuCanvas } from './DanmakuCanvas';
 import { usePlayerSettings } from './hooks/usePlayerSettings';
 import { useDanmaku } from './hooks/useDanmaku';
-import { useIsAndroidApp, useIsIOS, useIsMobile } from '@/lib/hooks/mobile/useDeviceDetection';
+import { useIsAndroidApp, useIsIOS, useIsMobile, useIsTvLike, useTvEnvironmentLabel } from '@/lib/hooks/mobile/useDeviceDetection';
 import { useDoubleTap } from '@/lib/hooks/mobile/useDoubleTap';
 import { settingsStore, DEFAULT_SEEK_STEP_SECONDS } from '@/lib/store/settings-store';
 import { premiumModeSettingsStore } from '@/lib/store/premium-mode-settings';
@@ -95,6 +95,8 @@ export function DesktopVideoPlayer({
   const isIOS = useIsIOS();
   const isMobile = useIsMobile();
   const isAndroidApp = useIsAndroidApp();
+  const isTvLike = useIsTvLike();
+  const tvEnvLabel = useTvEnvironmentLabel(); // TEMPORARY diagnostic
   const [viewportMetrics, setViewportMetrics] = React.useState<ViewportMetrics>(() => readViewportMetrics());
   const [seekStepSeconds, setSeekStepSeconds] = React.useState(DEFAULT_SEEK_STEP_SECONDS);
   const [webFullscreenSize, setWebFullscreenSize] = React.useState<WebFullscreenSize>(() => {
@@ -264,13 +266,13 @@ export function DesktopVideoPlayer({
   // is already immersive landscape, so it fills the screen.
   const autoFullscreenAppliedRef = React.useRef(false);
   React.useEffect(() => {
-    if (!isAndroidApp || !src) return;
+    if (!isTvLike || !src) return;
     if (autoFullscreenAppliedRef.current) return;
     if (data.fullscreenMode !== 'none') return;
 
     autoFullscreenAppliedRef.current = true;
     void logic.toggleWindowFullscreen();
-  }, [isAndroidApp, src, data.fullscreenMode, logic]);
+  }, [isTvLike, src, data.fullscreenMode, logic]);
 
   // Auto-skip intro/outro and auto-next episode
   const { isTransitioningToNextEpisode } = useAutoSkip({
@@ -378,6 +380,17 @@ export function DesktopVideoPlayer({
       onMouseMove={() => { handleMouseMove(); }}
       onMouseLeave={() => isPlaying && setShowControls(false)}
     >
+      {/* TEMPORARY diagnostic - remove once Android TV fullscreen is confirmed */}
+      <div
+        style={{
+          position: 'absolute', bottom: 4, left: 8, zIndex: 60,
+          font: '600 15px/1.3 monospace', color: '#0f0',
+          background: 'rgba(0,0,0,.75)', padding: '3px 8px', borderRadius: 4,
+          pointerEvents: 'none', whiteSpace: 'nowrap',
+        }}
+      >
+        {tvEnvLabel} fs={data.fullscreenMode}
+      </div>
       <div className={stageClassName}>
         {/* Clipping Wrapper for video and overlays - Restores the 'Liquid Glass' rounded look */}
         <div className={`absolute inset-0 overflow-hidden pointer-events-none ${data.fullscreenMode === 'window' ? 'rounded-none' : 'rounded-none sm:rounded-[var(--radius-2xl)]'
