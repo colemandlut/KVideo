@@ -40,4 +40,19 @@ export function useTvKeys(enabled: boolean) {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [enabled, rows, pos, setPos, getElement]);
+
+  // Re-assert DOM focus after the element under `pos` is replaced (e.g. a row
+  // remounts from skeleton to loaded content). Only steps in when focus was
+  // genuinely lost - never steals it from something deliberately focused.
+  useEffect(() => {
+    if (!enabled) return;
+
+    const element = getElement(pos);
+    if (!element || element === document.activeElement) return;
+
+    const active = document.activeElement;
+    if (active === null || active === document.body) {
+      element.focus({ preventScroll: true });
+    }
+  }, [enabled, rows, pos, getElement]);
 }

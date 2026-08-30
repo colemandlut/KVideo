@@ -22,7 +22,13 @@ interface TvRowProps {
   onSelect: (movie: TvMovie) => void;
 }
 
-/** Registers the row with the focus model. Length 1 means "one focusable skeleton". */
+/**
+ * Exactly one component may own the focus-model registration for a given row
+ * id. If a second component registered (and later unmounted) the same id, its
+ * cleanup would delete the registration the other owner still needs -
+ * including the element table the refs just populated - so registration and
+ * presentation are kept as separate components below.
+ */
 function useRowRegistration(id: string, rowIndex: number, length: number) {
   const { registerRow, unregisterRow } = useTvFocus();
 
@@ -32,16 +38,14 @@ function useRowRegistration(id: string, rowIndex: number, length: number) {
   }, [id, rowIndex, length, registerRow, unregisterRow]);
 }
 
-export function TvRowSkeleton({ id, rowIndex, title }: { id: string; rowIndex: number; title: string }) {
-  const { setItemElement } = useTvFocus();
-  useRowRegistration(id, rowIndex, 1);
-
+/** Presentational only: renders one focusable skeleton slot. Registers nothing. */
+function TvRowSkeletonView({ title, setRef }: { title: string; setRef: (el: HTMLButtonElement | null) => void }) {
   return (
     <section>
       <h2 className="tv-row-title">{title}</h2>
       <div className="tv-row-strip">
         <button
-          ref={(el) => setItemElement(id, 0, el)}
+          ref={setRef}
           type="button"
           tabIndex={-1}
           className="tv-focusable flex-shrink-0 w-[148px] h-[208px] rounded-[10px] bg-[#252b36]"
@@ -52,6 +56,13 @@ export function TvRowSkeleton({ id, rowIndex, title }: { id: string; rowIndex: n
   );
 }
 
+export function TvRowSkeleton({ id, rowIndex, title }: { id: string; rowIndex: number; title: string }) {
+  const { setItemElement } = useTvFocus();
+  useRowRegistration(id, rowIndex, 1);
+
+  return <TvRowSkeletonView title={title} setRef={(el) => setItemElement(id, 0, el)} />;
+}
+
 function TvRowLoaded({ id, rowIndex, title, tagId, tags, onSelect }: Omit<TvRowProps, 'shouldLoad'>) {
   const { setItemElement } = useTvFocus();
   const { movies } = usePopularMovies(tagId, tags, 'movie');
@@ -60,7 +71,7 @@ function TvRowLoaded({ id, rowIndex, title, tagId, tags, onSelect }: Omit<TvRowP
   useRowRegistration(id, rowIndex, movies.length > 0 ? movies.length : 1);
 
   if (movies.length === 0) {
-    return <TvRowSkeleton id={id} rowIndex={rowIndex} title={title} />;
+    return <TvRowSkeletonView title={title} setRef={(el) => setItemElement(id, 0, el)} />;
   }
 
   return (
