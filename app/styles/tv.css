@@ -48,9 +48,11 @@
   display: none;
 }
 
-/* Fills over the 800ms long-press-to-delete hold on a TV history card.
-   Restarted per press via a `key` change on the element (see TvHistoryRow),
-   not by re-triggering React state every frame. */
+/* Fills over the remainder of the 800ms long-press-to-act hold once the
+   250ms tap window (see lib/tv/useTvLongPressOk.ts) has passed - shared by
+   every row that supports "hold OK to remove" (watch history, favourites).
+   Restarted per press via a `key` change on the element (see TvHistoryRow /
+   TvFavorites), not by re-triggering React state every frame. */
 @keyframes tv-history-delete-progress {
   from {
     width: 0%;
@@ -62,5 +64,6 @@
 
 .tv-history-delete-progress {
   width: 0%;
-  animation: tv-history-delete-progress 800ms linear forwards;
+  /* 800ms long-press threshold minus the 250ms tap window. */
+  animation: tv-history-delete-progress 550ms linear forwards;
 }
