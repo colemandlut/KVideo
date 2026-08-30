@@ -29,12 +29,22 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function parseCastBody(body: unknown): CastCommand | null {
-  if (!body || typeof body !== 'object') {
+/**
+ * Validates and normalizes a candidate cast command.
+ *
+ * Used by both POST (validating the client's request body, with a
+ * server-generated `overrideTs`) and GET (validating whatever came back out
+ * of Redis, which may be a stale or foreign-shaped value left by another
+ * project sharing this database) so the two paths cannot drift apart.
+ */
+function normalizeCastCommand(value: unknown, overrideTs?: number): CastCommand | null {
+  if (!value || typeof value !== 'object') {
     return null;
   }
 
-  const { id, source, title, episode, t } = body as Record<string, unknown>;
+  const record = value as Record<string, unknown>;
+  const { id, source, title, episode, t } = record;
+  const ts = overrideTs ?? record.ts;
 
   if (
     (typeof id !== 'string' && typeof id !== 'number') ||
@@ -43,6 +53,9 @@ function parseCastBody(body: unknown): CastCommand | null {
     return null;
   }
   if (!isNonEmptyString(source) || !isNonEmptyString(title)) {
+    return null;
+  }
+  if (typeof ts !== 'number' || !Number.isFinite(ts)) {
     return null;
   }
 
@@ -69,7 +82,7 @@ function parseCastBody(body: unknown): CastCommand | null {
     title: title.trim().slice(0, MAX_TITLE_LENGTH),
     episode: episodeNum,
     t: tNum,
-    ts: Date.now(),
+    ts,
   };
 }
 
@@ -92,7 +105,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const command = parseCastBody(body);
+    const command = normalizeCastCommand(body, Date.now());
 
     if (!command) {
       return NextResponse.json(
@@ -124,8 +137,14 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const command = await redis.get(castKey(profileId));
-    return NextResponse.json({ success: true, command: command || null });
+    const stored = await redis.get(castKey(profileId));
+    const command = normalizeCastCommand(stored);
+
+    if (stored && !command) {
+      console.warn('Cast Get: stored value did not match the expected command shape');
+    }
+
+    return NextResponse.json({ success: true, command });
   } catch (error) {
     console.error('Redis Cast Get Error:', error);
     return NextResponse.json({ error: 'Failed to fetch cast command' }, { status: 500 });
