@@ -34,7 +34,8 @@ export function TvFocusProvider({ children }: { children: React.ReactNode }) {
   const registerRow = useCallback((id: string, rowIndex: number, length: number) => {
     const existing = registry.current.get(id);
     if (existing && existing.rowIndex === rowIndex && existing.length === length) return;
-    registry.current.set(id, { rowIndex, length, elements: existing?.elements ?? [] });
+    const elements = existing ? existing.elements.slice(0, length) : [];
+    registry.current.set(id, { rowIndex, length, elements });
     rebuildRows();
   }, [rebuildRows]);
 
@@ -54,22 +55,34 @@ export function TvFocusProvider({ children }: { children: React.ReactNode }) {
   const getElement = useCallback((target: TvFocusPos) => {
     const id = orderedIds[target.rowIndex];
     if (!id) return null;
-    return registry.current.get(id)?.elements[target.itemIndex] ?? null;
+    const row = registry.current.get(id);
+    if (!row || target.itemIndex < 0 || target.itemIndex >= row.length) return null;
+    return row.elements[target.itemIndex] ?? null;
   }, [orderedIds]);
 
   const setPos = useCallback((next: TvFocusPos) => {
     setPosState(next);
   }, []);
 
+  const rawClampedPos = clampFocus(rows, pos);
+  // Keyed on the primitive values (not the object) so the returned TvFocusPos
+  // keeps a stable identity across renders where the clamped position hasn't
+  // actually changed, even though clampFocus always allocates a new object.
+  const clampedPos = useMemo<TvFocusPos>(
+    () => rawClampedPos,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rawClampedPos.rowIndex, rawClampedPos.itemIndex],
+  );
+
   const value = useMemo<TvFocusContextValue>(() => ({
     rows,
-    pos: clampFocus(rows, pos),
+    pos: clampedPos,
     setPos,
     registerRow,
     unregisterRow,
     setItemElement,
     getElement,
-  }), [rows, pos, setPos, registerRow, unregisterRow, setItemElement, getElement]);
+  }), [rows, clampedPos, setPos, registerRow, unregisterRow, setItemElement, getElement]);
 
   return <TvFocusContext.Provider value={value}>{children}</TvFocusContext.Provider>;
 }
