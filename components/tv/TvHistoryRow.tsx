@@ -62,7 +62,20 @@ function TvHistoryCard({ item, onSelect, onDelete, setRef }: TvHistoryCardProps)
     // re-triggering play on every repeat while the delete timer is running.
     event.preventDefault();
 
-    if (event.repeat) return; // Android auto-repeat while held - nothing new to start
+    // `event.repeat` cannot be trusted here. The Android shell forwards the
+    // D-pad centre button by constructing a brand new KeyEvent for every
+    // auto-repeat:
+    //
+    //   webView.dispatchKeyEvent(KeyEvent(ACTION_DOWN, KEYCODE_ENTER))
+    //
+    // That constructor sets repeatCount to 0, so every repeat reaches the page
+    // looking like a fresh press with `repeat === false`. Relying on it meant a
+    // held key restarted the timer on every repeat, so the progress bar reset
+    // partway and the delete never fired - releasing then behaved as a short
+    // press and started playback instead.
+    //
+    // A press already in flight is the reliable signal, so use that instead.
+    if (timerRef.current !== null || longPressFiredRef.current) return;
 
     longPressFiredRef.current = false;
     setIsPressing(true);
