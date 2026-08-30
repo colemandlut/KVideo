@@ -21,6 +21,7 @@ import { premiumModeSettingsStore } from '@/lib/store/premium-mode-settings';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { getSourceName } from '@/lib/utils/source-names';
 import { retrieveGroupedSources, storeGroupedSources } from '@/lib/utils/grouped-sources-cache';
+import { TvPlayerPanel } from '@/components/tv/TvPlayerPanel';
 
 type PlayerViewportMode = 'standard' | 'wide' | 'cinema';
 
@@ -355,6 +356,35 @@ function PlayerContent() {
     router.replace(`/player?${params.toString()}`, { scroll: false });
   }, [searchParams, router, setCurrentEpisode, setPlayUrl, setVideoError]);
 
+  // Shared by the desktop <EpisodeList> source selector and the TV panel -
+  // preserves the episode index and playback position across a source
+  // switch, and stores the grouped-sources list under its short `gs` key.
+  const handleSourceChange = useCallback((newSource: SourceInfo) => {
+    const params = new URLSearchParams();
+    params.set('id', String(newSource.id));
+    params.set('source', newSource.source);
+    params.set('title', title || '');
+    // Preserve current episode index
+    params.set('episode', currentEpisode.toString());
+    // Preserve playback position for seamless source switch
+    if (playerTimeRef.current > 1) {
+      params.set('t', Math.floor(playerTimeRef.current).toString());
+    }
+    // Store all known sources using short gs key
+    const allSources = groupedSources.length > 0 ? groupedSources : [];
+    if (allSources.length > 1) {
+      const newKey = storeGroupedSources(allSources);
+      if (newKey) params.set('gs', newKey);
+    } else if (gsKey) {
+      params.set('gs', gsKey);
+    }
+    if (isPremium) {
+      params.set('premium', '1');
+    }
+    setCurrentSourceId(newSource.source);
+    router.replace(`/player?${params.toString()}`, { scroll: false });
+  }, [title, currentEpisode, groupedSources, gsKey, isPremium, router]);
+
   const handleToggleReverse = (reversed: boolean) => {
     setIsReversed(reversed);
     const settings = modeStore.getSettings();
@@ -532,31 +562,7 @@ function PlayerContent() {
                     onSourceSectionCollapseChange={setIsSourceSectionCollapsed}
                     episodeSectionCollapsed={isEpisodeSectionCollapsed}
                     onEpisodeSectionCollapseChange={setIsEpisodeSectionCollapsed}
-                    onSourceChange={(newSource) => {
-                      const params = new URLSearchParams();
-                      params.set('id', String(newSource.id));
-                      params.set('source', newSource.source);
-                      params.set('title', title || '');
-                      // Preserve current episode index
-                      params.set('episode', currentEpisode.toString());
-                      // Preserve playback position for seamless source switch
-                      if (playerTimeRef.current > 1) {
-                        params.set('t', Math.floor(playerTimeRef.current).toString());
-                      }
-                      // Store all known sources using short gs key
-                      const allSources = groupedSources.length > 0 ? groupedSources : [];
-                      if (allSources.length > 1) {
-                        const newKey = storeGroupedSources(allSources);
-                        if (newKey) params.set('gs', newKey);
-                      } else if (gsKey) {
-                        params.set('gs', gsKey);
-                      }
-                      if (isPremium) {
-                        params.set('premium', '1');
-                      }
-                      setCurrentSourceId(newSource.source);
-                      router.replace(`/player?${params.toString()}`, { scroll: false });
-                    }}
+                    onSourceChange={handleSourceChange}
                   />
                 </div>
               </div>
@@ -568,6 +574,18 @@ function PlayerContent() {
 
       {/* Favorites Sidebar - Left */}
       <FavoritesSidebar isPremium={isPremium} />
+
+      {/* TV remote overlay - renders nothing unless useIsTvLike() is true.
+          Placed last so it paints above the fullscreen video container,
+          which shares the same max z-index. */}
+      <TvPlayerPanel
+        episodes={videoData?.episodes || null}
+        currentEpisode={currentEpisode}
+        onEpisodeSelect={handleEpisodeClick}
+        sources={groupedSources}
+        currentSourceId={currentSourceId || source || ''}
+        onSourceChange={handleSourceChange}
+      />
     </div>
   );
 }
