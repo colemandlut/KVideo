@@ -59,6 +59,14 @@ test('clampFocus pulls a stale position back in range when a row shrinks', () =>
   assert.deepEqual(clampFocus(shrunk, { rowIndex: 9, itemIndex: 0 }), { rowIndex: 1, itemIndex: 0 });
 });
 
+test('clampFocus is idempotent, so committing a clamped position cannot loop', () => {
+  const rows: TvRowMeta[] = [{ id: 'a', length: 1 }, { id: 'b', length: 5 }];
+  for (const start of [{ rowIndex: 9, itemIndex: 9 }, { rowIndex: -3, itemIndex: -1 }, { rowIndex: 1, itemIndex: 4 }]) {
+    const once = clampFocus(rows, start);
+    assert.deepEqual(clampFocus(rows, once), once);
+  }
+});
+
 test('isAtRowEnd reports the last item of a row', () => {
   assert.equal(isAtRowEnd(rows, { rowIndex: 3, itemIndex: 1 }), true);
   assert.equal(isAtRowEnd(rows, { rowIndex: 3, itemIndex: 0 }), false);

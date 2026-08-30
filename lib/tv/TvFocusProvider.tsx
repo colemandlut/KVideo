@@ -70,25 +70,27 @@ export function TvFocusProvider({ children }: { children: React.ReactNode }) {
     setPosState(next);
   }, []);
 
-  const rawClampedPos = clampFocus(rows, pos);
-  // Keyed on the primitive values (not the object) so the returned TvFocusPos
-  // keeps a stable identity across renders where the clamped position hasn't
-  // actually changed, even though clampFocus always allocates a new object.
-  const clampedPos = useMemo<TvFocusPos>(
-    () => rawClampedPos,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rawClampedPos.rowIndex, rawClampedPos.itemIndex],
-  );
+  // Clamp is computed during render (React's documented "adjust state during
+  // render" pattern) and, when it differs from the stored position, written
+  // straight back with setPosState. This makes the clamp a committed fact
+  // rather than a derived value: once `pos` state itself holds the clamped
+  // coordinate, a later render that grows `rows` again has nothing stale to
+  // spring back to. Comparing field-by-field (not object identity) matters
+  // because clampFocus allocates a new object on every call.
+  const clamped = clampFocus(rows, pos);
+  if (clamped.rowIndex !== pos.rowIndex || clamped.itemIndex !== pos.itemIndex) {
+    setPosState(clamped);
+  }
 
   const value = useMemo<TvFocusContextValue>(() => ({
     rows,
-    pos: clampedPos,
+    pos: clamped,
     setPos,
     registerRow,
     unregisterRow,
     setItemElement,
     getElement,
-  }), [rows, clampedPos, setPos, registerRow, unregisterRow, setItemElement, getElement]);
+  }), [rows, clamped, setPos, registerRow, unregisterRow, setItemElement, getElement]);
 
   return <TvFocusContext.Provider value={value}>{children}</TvFocusContext.Provider>;
 }
