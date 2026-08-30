@@ -25,9 +25,9 @@ test('down skips a row that loaded but has no items', () => {
   assert.deepEqual(moveFocus(rows, { rowIndex: 1, itemIndex: 0 }, 'down'), { rowIndex: 3, itemIndex: 0 });
 });
 
-test('changing row keeps the column, clamped to the shorter row', () => {
-  assert.deepEqual(moveFocus(rows, { rowIndex: 1, itemIndex: 5 }, 'down'), { rowIndex: 3, itemIndex: 1 });
-  assert.deepEqual(moveFocus(rows, { rowIndex: 1, itemIndex: 5 }, 'up'), { rowIndex: 0, itemIndex: 2 });
+test('changing row lands on the start of that row', () => {
+  assert.deepEqual(moveFocus(rows, { rowIndex: 1, itemIndex: 5 }, 'down'), { rowIndex: 3, itemIndex: 0 });
+  assert.deepEqual(moveFocus(rows, { rowIndex: 1, itemIndex: 5 }, 'up'), { rowIndex: 0, itemIndex: 0 });
 });
 
 test('up from the first row stays put', () => {

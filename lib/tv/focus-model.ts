@@ -36,6 +36,19 @@ export function isAtRowEnd(rows: TvRowMeta[], pos: TvFocusPos): boolean {
   return Boolean(row) && row.length > 0 && pos.itemIndex >= row.length - 1;
 }
 
+/**
+ * Computes the next focus position for a D-pad press.
+ *
+ * Left/right move within the current row and stop at either end (no wrapping).
+ *
+ * Up/down move to the nearest non-empty row in that direction and land on that
+ * row's first item (index 0), rather than preserving the current column. Each
+ * row is an independently horizontally-scrolling strip with its own scroll
+ * offset, so preserving the column would carry a scrolled-right offset into
+ * every row visited afterward, making it impossible to see the start of the
+ * rows below. Resetting to item 0 keeps every row you land on starting from
+ * its beginning.
+ */
 export function moveFocus(rows: TvRowMeta[], current: TvFocusPos, dir: TvDirection): TvFocusPos {
   if (rows.length === 0) return current;
 
@@ -55,7 +68,7 @@ export function moveFocus(rows: TvRowMeta[], current: TvFocusPos, dir: TvDirecti
   const step = dir === 'up' ? -1 : 1;
   for (let i = current.rowIndex + step; i >= 0 && i < rows.length; i += step) {
     if (rows[i].length > 0) {
-      return { rowIndex: i, itemIndex: Math.min(current.itemIndex, rows[i].length - 1) };
+      return { rowIndex: i, itemIndex: 0 };
     }
   }
 
