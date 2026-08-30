@@ -257,6 +257,21 @@ export function DesktopVideoPlayer({
     seekStepSeconds,
   });
 
+  // A D-pad remote cannot move focus onto the player controls, because the
+  // arrow keys are consumed for seek/volume, so the fullscreen button is
+  // unreachable on Android TV. Enter window fullscreen automatically instead:
+  // it is pure layout state (no user gesture required) and the shell activity
+  // is already immersive landscape, so it fills the screen.
+  const autoFullscreenAppliedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!isAndroidApp || !src) return;
+    if (autoFullscreenAppliedRef.current) return;
+    if (data.fullscreenMode !== 'none') return;
+
+    autoFullscreenAppliedRef.current = true;
+    void logic.toggleWindowFullscreen();
+  }, [isAndroidApp, src, data.fullscreenMode, logic]);
+
   // Auto-skip intro/outro and auto-next episode
   const { isTransitioningToNextEpisode } = useAutoSkip({
     videoRef,
