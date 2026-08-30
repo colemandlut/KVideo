@@ -6,6 +6,7 @@ import { TvFocusProvider, useTvFocus } from '@/lib/tv/TvFocusProvider';
 import { useTvKeys } from '@/lib/tv/useTvKeys';
 import { TvRow } from './TvRow';
 import { TvRecommendRow } from './TvRecommendRow';
+import { TvHistoryRow } from './TvHistoryRow';
 import { TvSearchResults } from './TvSearchResults';
 import type { TvMovie } from './TvPosterCard';
 import type { Video } from '@/lib/types';
@@ -23,17 +24,23 @@ const TV_CATEGORIES = [
 
 const TAGS = TV_CATEGORIES.map((c) => ({ id: c.id, label: c.title, value: c.value }));
 
+type ContentType = 'movie' | 'tv';
+
 interface TopbarRowProps {
+  contentType: ContentType;
+  onContentTypeChange: (type: ContentType) => void;
   onFavorites: () => void;
   onSettings: () => void;
 }
 
-function TopbarRow({ onFavorites, onSettings }: TopbarRowProps) {
+function TopbarRow({ contentType, onContentTypeChange, onFavorites, onSettings }: TopbarRowProps) {
   const { registerRow, unregisterRow, setItemElement } = useTvFocus();
 
   const actions = [
-    { label: '收藏', onClick: onFavorites },
-    { label: '设置', onClick: onSettings },
+    { label: '电影', onClick: () => onContentTypeChange('movie'), selected: contentType === 'movie' },
+    { label: '电视剧', onClick: () => onContentTypeChange('tv'), selected: contentType === 'tv' },
+    { label: '收藏', onClick: onFavorites, selected: false },
+    { label: '设置', onClick: onSettings, selected: false },
   ];
   const length = actions.length;
 
@@ -50,7 +57,9 @@ function TopbarRow({ onFavorites, onSettings }: TopbarRowProps) {
           ref={(el) => setItemElement('topbar', index, el)}
           type="button"
           tabIndex={-1}
-          className="tv-focusable flex-shrink-0 px-7 py-3 rounded-full bg-[#252b36] text-[16px]"
+          className={`tv-focusable flex-shrink-0 px-7 py-3 rounded-full text-[16px] ${
+            action.selected ? 'bg-[#3b82f6]' : 'bg-[#252b36]'
+          }`}
           onClick={action.onClick}
         >
           {action.label}
@@ -73,6 +82,8 @@ function TvHomeContent({ query, hasSearched, loading, results, onSearch, onReset
   const router = useRouter();
   const { pos } = useTvFocus();
   useTvKeys(true);
+
+  const [contentType, setContentType] = useState<ContentType>('movie');
 
   // Derived, monotonically-increasing high-water mark of the furthest row
   // reached. Updated during render (not in an effect) so the set of loaded
@@ -98,14 +109,18 @@ function TvHomeContent({ query, hasSearched, loading, results, onSearch, onReset
   return (
     <div className="tv-root min-h-screen bg-[#0f1218] text-[#e8eaed]">
       <TopbarRow
+        contentType={contentType}
+        onContentTypeChange={setContentType}
         onFavorites={() => router.push('/favorites')}
         onSettings={() => router.push('/settings')}
       />
 
-      <TvRecommendRow id="recommend" rowIndex={1} onSelect={handleSelect} />
+      <TvHistoryRow id="history" rowIndex={1} />
+
+      <TvRecommendRow id="recommend" rowIndex={2} onSelect={handleSelect} />
 
       {TV_CATEGORIES.map((category, index) => {
-        const rowIndex = index + 2;
+        const rowIndex = index + 3;
         return (
           <TvRow
             key={category.id}
@@ -114,7 +129,8 @@ function TvHomeContent({ query, hasSearched, loading, results, onSearch, onReset
             title={category.title}
             tagId={category.id}
             tags={TAGS}
-            shouldLoad={rowIndex <= Math.max(2, maxRowReached + 1)}
+            contentType={contentType}
+            shouldLoad={rowIndex <= Math.max(3, maxRowReached + 1)}
             onSelect={handleSelect}
           />
         );
