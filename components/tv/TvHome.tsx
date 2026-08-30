@@ -69,11 +69,36 @@ export interface TvHomeProps {
 
 function TvHomeContent({ query, hasSearched, loading, results, onSearch, onReset }: TvHomeProps) {
   const router = useRouter();
-  const { pos } = useTvFocus();
+  const { pos, setPos } = useTvFocus();
   useTvKeys(true);
 
   const [contentType, setContentType] = useState<ContentType>('movie');
   const [tags, setTags] = useState<TvTag[] | null>(null);
+
+  // The Android shell's Back key falls through to a "configure server URL"
+  // screen whenever WebView's history.canGoBack() is false - which is the
+  // case the instant the app starts, since the WebView has a single history
+  // entry and JS cannot intercept the physical Back key. Keep a spare entry
+  // in the session history at all times while on the bare TV home route so
+  // Back always has somewhere harmless to go instead of quitting out to
+  // setup. Re-armed only on the bare `/` route (no `?q=`) - results pages
+  // push their own `/?q=...` URL and Back from there must be free to land
+  // back on `/` normally.
+  useEffect(() => {
+    const isBareHome = () =>
+      window.location.pathname === '/' && !new URLSearchParams(window.location.search).has('q');
+
+    window.history.pushState({ tvBackGuard: true }, '');
+
+    const handlePopState = () => {
+      if (isBareHome()) {
+        window.history.pushState({ tvBackGuard: true }, '');
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   // Refetch the category tag list whenever the selected content type
   // changes - movie and tv use entirely different Douban tag sets. `ignore`
@@ -122,6 +147,19 @@ function TvHomeContent({ query, hasSearched, loading, results, onSearch, onReset
     onSearch(movie.title);
   }, [onSearch]);
 
+  // Switching 电影/电视剧 refetches every category row, but if focus stays
+  // on the topbar and the page stays scrolled where it was, nothing visible
+  // tells the user the content actually changed. Snap the page back to the
+  // top and land focus on the first category row so the switch is obvious.
+  // Row 3 may not exist yet (tags are still loading) - that's fine, clampFocus
+  // keeps `pos` in range and useTvKeys' focus-recovery effect re-asserts DOM
+  // focus once the row registers.
+  const handleContentTypeChange = useCallback((type: ContentType) => {
+    setContentType(type);
+    setPos({ rowIndex: 3, itemIndex: 0 });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [setPos]);
+
   if (hasSearched) {
     return (
       <div className="tv-root min-h-screen bg-[#0f1218] text-[#e8eaed]">
@@ -134,7 +172,7 @@ function TvHomeContent({ query, hasSearched, loading, results, onSearch, onReset
     <div className="tv-root min-h-screen bg-[#0f1218] text-[#e8eaed]">
       <TopbarRow
         contentType={contentType}
-        onContentTypeChange={setContentType}
+        onContentTypeChange={handleContentTypeChange}
         onFavorites={() => router.push('/favorites')}
         onSettings={() => router.push('/settings')}
       />
