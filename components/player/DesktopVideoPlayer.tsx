@@ -12,7 +12,7 @@ import { DesktopOverlayWrapper } from './desktop/DesktopOverlayWrapper';
 import { DanmakuCanvas } from './DanmakuCanvas';
 import { usePlayerSettings } from './hooks/usePlayerSettings';
 import { useDanmaku } from './hooks/useDanmaku';
-import { useIsIOS, useIsMobile } from '@/lib/hooks/mobile/useDeviceDetection';
+import { useIsAndroidApp, useIsIOS, useIsMobile } from '@/lib/hooks/mobile/useDeviceDetection';
 import { useDoubleTap } from '@/lib/hooks/mobile/useDoubleTap';
 import { settingsStore, DEFAULT_SEEK_STEP_SECONDS } from '@/lib/store/settings-store';
 import { premiumModeSettingsStore } from '@/lib/store/premium-mode-settings';
@@ -94,6 +94,7 @@ export function DesktopVideoPlayer({
   const { fullscreenType: settingsFullscreenType } = usePlayerSettings(isPremium);
   const isIOS = useIsIOS();
   const isMobile = useIsMobile();
+  const isAndroidApp = useIsAndroidApp();
   const [viewportMetrics, setViewportMetrics] = React.useState<ViewportMetrics>(() => readViewportMetrics());
   const [seekStepSeconds, setSeekStepSeconds] = React.useState(DEFAULT_SEEK_STEP_SECONDS);
   const [webFullscreenSize, setWebFullscreenSize] = React.useState<WebFullscreenSize>(() => {
@@ -147,10 +148,11 @@ export function DesktopVideoPlayer({
 
   // Use user preference for fullscreen type, resolving 'auto' to device default
   // Auto Rules:
+  // - Android shell app: Native Fullscreen (the app implements onShowCustomView)
   // - Mobile: Window Fullscreen (Better for Danmaku/Controls)
   // - Desktop: Native Fullscreen (Better for PiP/Performance)
   const fullscreenType = settingsFullscreenType === 'auto'
-    ? (isIOS ? 'window' : isMobile ? 'window' : 'native') // Treat all mobile as window for consistency if auto
+    ? (isAndroidApp ? 'native' : isIOS ? 'window' : isMobile ? 'window' : 'native') // Treat all mobile as window for consistency if auto
     : settingsFullscreenType;
 
   const isLandscape = viewportMetrics.width > viewportMetrics.height;
