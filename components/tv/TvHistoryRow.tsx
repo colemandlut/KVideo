@@ -13,6 +13,12 @@ interface TvHistoryRowProps {
 
 const MAX_ITEMS = 20;
 const LONG_PRESS_MS = 800;
+// Releasing before this counts as a quick tap and plays. Releasing after it -
+// once the delete progress bar is on screen - is treated as the user changing
+// their mind, and does nothing at all. Making the tap window end exactly when
+// the bar appears is what makes the rule visible: if you can see the bar, you
+// have already left tap territory.
+const TAP_MS = 250;
 
 interface TvHistoryCardProps {
   item: VideoHistoryItem;
@@ -42,12 +48,18 @@ function TvHistoryCard({ item, onSelect, onDelete, setRef }: TvHistoryCardProps)
   // Timer for the pending long-press delete, and a flag so the keyup that
   // follows a fired long-press doesn't also trigger a short-press select.
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pressStartRef = useRef(0);
   const longPressFiredRef = useRef(false);
 
   const clearPressTimer = () => {
     if (timerRef.current !== null) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
+    }
+    if (tapTimerRef.current !== null) {
+      clearTimeout(tapTimerRef.current);
+      tapTimerRef.current = null;
     }
   };
 
@@ -78,10 +90,17 @@ function TvHistoryCard({ item, onSelect, onDelete, setRef }: TvHistoryCardProps)
     if (timerRef.current !== null || longPressFiredRef.current) return;
 
     longPressFiredRef.current = false;
-    setIsPressing(true);
-    setPressToken((token) => token + 1);
+    pressStartRef.current = Date.now();
 
     clearPressTimer();
+
+    // The bar only appears once the tap window has passed, so a quick tap never
+    // flashes it and a visible bar always means "releasing now does nothing".
+    tapTimerRef.current = setTimeout(() => {
+      tapTimerRef.current = null;
+      setIsPressing(true);
+      setPressToken((token) => token + 1);
+    }, TAP_MS);
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
       longPressFiredRef.current = true;
@@ -94,12 +113,16 @@ function TvHistoryCard({ item, onSelect, onDelete, setRef }: TvHistoryCardProps)
     if (event.key !== 'Enter') return;
 
     const wasLongPress = longPressFiredRef.current;
+    const heldFor = Date.now() - pressStartRef.current;
     clearPressTimer();
     setIsPressing(false);
 
-    if (!wasLongPress) {
-      onSelect(item);
-    }
+    // Long press already deleted, or the user held past the tap window and then
+    // let go - an abandoned delete, which should do nothing rather than fall
+    // through to playing something they did not ask for.
+    if (wasLongPress || heldFor >= TAP_MS) return;
+
+    onSelect(item);
   };
 
   const handleBlur = () => {

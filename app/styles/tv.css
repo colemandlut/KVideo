@@ -62,5 +62,6 @@
 
 .tv-history-delete-progress {
   width: 0%;
-  animation: tv-history-delete-progress 800ms linear forwards;
+  /* 800ms delete threshold minus the 250ms tap window. */
+  animation: tv-history-delete-progress 550ms linear forwards;
 }
