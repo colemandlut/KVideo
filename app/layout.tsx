@@ -16,6 +16,7 @@ import { ScrollPositionManager } from "@/components/ScrollPositionManager";
 import { LocaleProvider } from "@/components/LocaleProvider";
 import { RuntimeFeaturesProvider } from "@/components/RuntimeFeaturesProvider";
 import { VideoTogetherController } from '@/components/VideoTogetherController';
+import { TvCastReceiver } from '@/components/tv/TvCastReceiver';
 import { shouldEnableVercelAnalytics } from '@/lib/config/deployment';
 import { getRuntimeFeatures } from "@/lib/server/runtime-features";
 import { resolveSiteIconSrc } from '@/lib/server/site-icon';
@@ -116,6 +117,7 @@ export default async function RootLayout({
                 scriptUrl={videoTogetherScriptUrl}
                 settingUrl={videoTogetherSettingUrl}
               />
+              <TvCastReceiver />
               <LocaleProvider />
 
               <TVProvider>
