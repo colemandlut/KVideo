@@ -84,11 +84,28 @@ function TvHomeContent({ query, hasSearched, loading, results, onSearch, onReset
   // setup. Re-armed only on the bare `/` route (no `?q=`) - results pages
   // push their own `/?q=...` URL and Back from there must be free to land
   // back on `/` normally.
+  //
+  // Both the mount-time push and the popstate re-push MUST share this exact
+  // predicate. The guard exists solely to keep webView.canGoBack() true at
+  // the top level; if either call site pushed unconditionally, a mount that
+  // happens to land on a non-home URL (e.g. this component remounting on
+  // `/?q=...` after the WebView pops back from /player) would insert a
+  // stray same-URL entry, and the user's next Back press would silently
+  // consume that entry instead of visibly going anywhere - Back would
+  // appear to do nothing.
   useEffect(() => {
     const isBareHome = () =>
       window.location.pathname === '/' && !new URLSearchParams(window.location.search).has('q');
 
-    window.history.pushState({ tvBackGuard: true }, '');
+    // NOTE: this writes a plain object into history.state, which is a
+    // foreign shape as far as Next's App Router is concerned - it keeps its
+    // own bookkeeping (route tree, scroll position, etc.) in that same slot.
+    // This is deliberate for now, but if back/forward navigation ever starts
+    // behaving oddly (lost scroll restoration, a full reload instead of a
+    // soft transition), this is the first place to re-check.
+    if (isBareHome()) {
+      window.history.pushState({ tvBackGuard: true }, '');
+    }
 
     const handlePopState = () => {
       if (isBareHome()) {
@@ -155,10 +172,11 @@ function TvHomeContent({ query, hasSearched, loading, results, onSearch, onReset
   // keeps `pos` in range and useTvKeys' focus-recovery effect re-asserts DOM
   // focus once the row registers.
   const handleContentTypeChange = useCallback((type: ContentType) => {
+    if (type === contentType) return;
     setContentType(type);
     setPos({ rowIndex: 3, itemIndex: 0 });
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, [setPos]);
+  }, [contentType, setPos]);
 
   if (hasSearched) {
     return (
