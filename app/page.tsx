@@ -26,6 +26,8 @@ function HomePage() {
     handleCancelSearch,
   } = useHomePage();
 
+  const isTvLike = useIsTvLike();
+
   // Real-time latency pinging
   const sourceUrls = useMemo(() =>
     availableSources.flatMap((source) =>
@@ -36,10 +38,8 @@ function HomePage() {
 
   const { latencies } = useLatencyPing({
     sourceUrls,
-    enabled: hasSearched && results.length > 0,
+    enabled: hasSearched && results.length > 0 && !isTvLike,
   });
-
-  const isTvLike = useIsTvLike();
 
   if (isTvLike) {
     return (
