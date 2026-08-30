@@ -10,13 +10,13 @@ const COLUMNS = 5;
 /** Exactly one component may own the registration for a given row id - a second
  *  owner's effect cleanup would delete the first one's entry, including the
  *  element table its ref callbacks just populated. */
-function useRowRegistration(id: string, rowIndex: number, length: number) {
+function useRowRegistration(id: string, rowIndex: number, length: number, keepColumn?: boolean) {
   const { registerRow, unregisterRow } = useTvFocus();
 
   useEffect(() => {
-    registerRow(id, rowIndex, length);
+    registerRow(id, rowIndex, length, keepColumn);
     return () => unregisterRow(id);
-  }, [id, rowIndex, length, registerRow, unregisterRow]);
+  }, [id, rowIndex, length, keepColumn, registerRow, unregisterRow]);
 }
 
 function BackRow({ onBack }: { onBack: () => void }) {
@@ -47,7 +47,7 @@ interface TvResultRowProps {
 function TvResultRow({ rowIndex, videos, onSelect }: TvResultRowProps) {
   const { setItemElement } = useTvFocus();
   const id = `result-${rowIndex}`;
-  useRowRegistration(id, rowIndex, videos.length);
+  useRowRegistration(id, rowIndex, videos.length, true);
 
   return (
     <div className="tv-row-strip">

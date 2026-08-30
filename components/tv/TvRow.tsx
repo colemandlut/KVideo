@@ -17,6 +17,7 @@ interface TvRowProps {
   title: string;
   tagId: string;
   tags: TvTag[];
+  contentType: 'movie' | 'tv';
   /** False keeps the row a focusable skeleton and never mounts the fetching child. */
   shouldLoad: boolean;
   onSelect: (movie: TvMovie) => void;
@@ -63,9 +64,9 @@ export function TvRowSkeleton({ id, rowIndex, title }: { id: string; rowIndex: n
   return <TvRowSkeletonView title={title} setRef={(el) => setItemElement(id, 0, el)} />;
 }
 
-function TvRowLoaded({ id, rowIndex, title, tagId, tags, onSelect }: Omit<TvRowProps, 'shouldLoad'>) {
+function TvRowLoaded({ id, rowIndex, title, tagId, tags, contentType, onSelect }: Omit<TvRowProps, 'shouldLoad'>) {
   const { setItemElement } = useTvFocus();
-  const { movies } = usePopularMovies(tagId, tags, 'movie');
+  const { movies } = usePopularMovies(tagId, tags, contentType);
 
   // Still one focusable skeleton slot until the first page arrives.
   useRowRegistration(id, rowIndex, movies.length > 0 ? movies.length : 1);

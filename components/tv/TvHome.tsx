@@ -4,36 +4,32 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TvFocusProvider, useTvFocus } from '@/lib/tv/TvFocusProvider';
 import { useTvKeys } from '@/lib/tv/useTvKeys';
-import { TvRow } from './TvRow';
+import { TvRow, type TvTag } from './TvRow';
 import { TvRecommendRow } from './TvRecommendRow';
+import { TvHistoryRow } from './TvHistoryRow';
 import { TvSearchResults } from './TvSearchResults';
 import type { TvMovie } from './TvPosterCard';
 import type { Video } from '@/lib/types';
 
-const TV_CATEGORIES = [
-  { id: 'popular', title: '热门', value: '热门' },
-  { id: 'latest', title: '最新', value: '最新' },
-  { id: 'top', title: '豆瓣高分', value: '豆瓣高分' },
-  { id: 'hidden', title: '冷门佳片', value: '冷门佳片' },
-  { id: 'chinese', title: '华语', value: '华语' },
-  { id: 'western', title: '欧美', value: '欧美' },
-  { id: 'korean', title: '韩国', value: '韩国' },
-  { id: 'japanese', title: '日本', value: '日本' },
-];
+const FALLBACK_TAGS: TvTag[] = [{ id: '热门', label: '热门', value: '热门' }];
 
-const TAGS = TV_CATEGORIES.map((c) => ({ id: c.id, label: c.title, value: c.value }));
+type ContentType = 'movie' | 'tv';
 
 interface TopbarRowProps {
+  contentType: ContentType;
+  onContentTypeChange: (type: ContentType) => void;
   onFavorites: () => void;
   onSettings: () => void;
 }
 
-function TopbarRow({ onFavorites, onSettings }: TopbarRowProps) {
+function TopbarRow({ contentType, onContentTypeChange, onFavorites, onSettings }: TopbarRowProps) {
   const { registerRow, unregisterRow, setItemElement } = useTvFocus();
 
   const actions = [
-    { label: '收藏', onClick: onFavorites },
-    { label: '设置', onClick: onSettings },
+    { label: '电影', onClick: () => onContentTypeChange('movie'), selected: contentType === 'movie' },
+    { label: '电视剧', onClick: () => onContentTypeChange('tv'), selected: contentType === 'tv' },
+    { label: '收藏', onClick: onFavorites, selected: false },
+    { label: '设置', onClick: onSettings, selected: false },
   ];
   const length = actions.length;
 
@@ -50,7 +46,9 @@ function TopbarRow({ onFavorites, onSettings }: TopbarRowProps) {
           ref={(el) => setItemElement('topbar', index, el)}
           type="button"
           tabIndex={-1}
-          className="tv-focusable flex-shrink-0 px-7 py-3 rounded-full bg-[#252b36] text-[16px]"
+          className={`tv-focusable flex-shrink-0 px-7 py-3 rounded-full text-[16px] ${
+            action.selected ? 'bg-[#3b82f6]' : 'bg-[#252b36]'
+          }`}
           onClick={action.onClick}
         >
           {action.label}
@@ -73,6 +71,43 @@ function TvHomeContent({ query, hasSearched, loading, results, onSearch, onReset
   const router = useRouter();
   const { pos } = useTvFocus();
   useTvKeys(true);
+
+  const [contentType, setContentType] = useState<ContentType>('movie');
+  const [tags, setTags] = useState<TvTag[] | null>(null);
+
+  // Refetch the category tag list whenever the selected content type
+  // changes - movie and tv use entirely different Douban tag sets. `ignore`
+  // guards against a stale response winning a race: if the user flips
+  // movie -> tv -> movie quickly, the in-flight request for the wrong type
+  // must not overwrite the newer list. All setState calls happen inside the
+  // nested async function (before or after its awaits), never directly in
+  // the effect body, matching the pattern in useTagManager.ts.
+  useEffect(() => {
+    let ignore = false;
+
+    const loadTags = async () => {
+      setTags(null);
+      try {
+        const response = await fetch(`/api/douban/tags?type=${contentType}`);
+        const data = await response.json();
+        if (ignore) return;
+        if (Array.isArray(data.tags) && data.tags.length > 0) {
+          setTags(data.tags.map((label: string) => ({ id: label, label, value: label })));
+        } else {
+          setTags(FALLBACK_TAGS);
+        }
+      } catch (error) {
+        console.error('Fetch tv tags error:', error);
+        if (!ignore) setTags(FALLBACK_TAGS);
+      }
+    };
+
+    loadTags();
+
+    return () => {
+      ignore = true;
+    };
+  }, [contentType]);
 
   // Derived, monotonically-increasing high-water mark of the furthest row
   // reached. Updated during render (not in an effect) so the set of loaded
@@ -98,23 +133,28 @@ function TvHomeContent({ query, hasSearched, loading, results, onSearch, onReset
   return (
     <div className="tv-root min-h-screen bg-[#0f1218] text-[#e8eaed]">
       <TopbarRow
+        contentType={contentType}
+        onContentTypeChange={setContentType}
         onFavorites={() => router.push('/favorites')}
         onSettings={() => router.push('/settings')}
       />
 
-      <TvRecommendRow id="recommend" rowIndex={1} onSelect={handleSelect} />
+      <TvHistoryRow id="history" rowIndex={1} />
 
-      {TV_CATEGORIES.map((category, index) => {
-        const rowIndex = index + 2;
+      <TvRecommendRow id="recommend" rowIndex={2} onSelect={handleSelect} />
+
+      {tags && tags.map((tag, index) => {
+        const rowIndex = index + 3;
         return (
           <TvRow
-            key={category.id}
-            id={category.id}
+            key={tag.id}
+            id={tag.id}
             rowIndex={rowIndex}
-            title={category.title}
-            tagId={category.id}
-            tags={TAGS}
-            shouldLoad={rowIndex <= Math.max(2, maxRowReached + 1)}
+            title={tag.label}
+            tagId={tag.id}
+            tags={tags}
+            contentType={contentType}
+            shouldLoad={rowIndex <= Math.max(3, maxRowReached + 1)}
             onSelect={handleSelect}
           />
         );
