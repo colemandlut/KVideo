@@ -70,7 +70,7 @@ export interface TvHomeProps {
 
 function TvHomeContent({ query, hasSearched, loading, results, latencies, onSearch, onReset }: TvHomeProps) {
   const router = useRouter();
-  const { pos, setPos } = useTvFocus();
+  const { pos } = useTvFocus();
   useTvKeys(true);
 
   const [contentType, setContentType] = useState<ContentType>('movie');
@@ -175,9 +175,15 @@ function TvHomeContent({ query, hasSearched, loading, results, latencies, onSear
   const handleContentTypeChange = useCallback((type: ContentType) => {
     if (type === contentType) return;
     setContentType(type);
-    setPos({ rowIndex: 3, itemIndex: 0 });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, [contentType, setPos]);
+    // Scroll back to the top so the changed rows are what the user is looking
+    // at. Focus deliberately stays on the button that was pressed: moving it
+    // to the first category row does not work, because the new tag list is
+    // still being fetched and clampFocus pulls the position back to the topbar
+    // - which lands the highlight on the *other* content-type button, so
+    // pressing 电视剧 would visibly jump the highlight onto 电影.
+    // Instant, not smooth: smooth scrolling is unreliable in WebView.
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }, [contentType]);
 
   if (hasSearched) {
     return (
