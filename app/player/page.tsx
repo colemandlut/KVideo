@@ -579,6 +579,8 @@ function PlayerContent() {
           Placed last so it paints above the fullscreen video container,
           which shares the same max z-index. */}
       <TvPlayerPanel
+        videoId={videoId}
+        source={source}
         episodes={videoData?.episodes || null}
         currentEpisode={currentEpisode}
         onEpisodeSelect={handleEpisodeClick}

@@ -11,6 +11,11 @@ interface PanelEpisode {
 }
 
 interface TvPlayerPanelProps {
+  // Identity of the video currently playing - used only to detect that it
+  // changed underneath an open panel (e.g. a cast arriving mid-browse), not
+  // rendered directly.
+  videoId: string | null;
+  source: string | null;
   episodes: PanelEpisode[] | null;
   currentEpisode: number;
   onEpisodeSelect: (episode: PanelEpisode, index: number) => void;
@@ -41,6 +46,8 @@ const EPISODES_ROW = 0;
  * decide, key by key, whether the player should also see the event.
  */
 export function TvPlayerPanel({
+  videoId,
+  source,
   episodes,
   currentEpisode,
   onEpisodeSelect,
@@ -55,6 +62,32 @@ export function TvPlayerPanel({
 
   const episodeRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const sourceRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // Close the panel (and reset its position) the moment the video it's
+  // describing changes underneath it - e.g. TvCastReceiver navigating the
+  // player to a different id/source while the panel is open. At that point
+  // the episode/source lists on screen belong to a video that's no longer
+  // playing, and a stale `pos` could point past the end of the new lists
+  // (moveFocus only special-cases a row that's now fully empty, not one
+  // that merely shrank below the old itemIndex). Closing sidesteps both
+  // problems at once, and is simpler than re-clamping a menu that no
+  // longer describes anything real.
+  //
+  // This adjusts state during render (React's documented pattern - see also
+  // TvHome.tsx's `maxRowReached`) rather than in a useEffect. A ref-guarded
+  // conditional setState inside a useEffect body was tried first, but
+  // react-hooks/set-state-in-effect flags it regardless: its exemption for
+  // ref-derived values only covers a setState call whose *argument* is
+  // derived from a ref, not one whose surrounding `if` is - so a
+  // `useEffect(() => { if (prevRef.current !== key) setIsOpen(false); ... })`
+  // still errors here. The render-time form has no such gap.
+  const videoKey = `${videoId ?? ''}:${source ?? ''}`;
+  const [trackedVideoKey, setTrackedVideoKey] = useState(videoKey);
+  if (videoKey !== trackedVideoKey) {
+    setTrackedVideoKey(videoKey);
+    setIsOpen(false);
+    setPos({ rowIndex: 0, itemIndex: 0 });
+  }
 
   const episodeList = useMemo(() => episodes ?? [], [episodes]);
 
