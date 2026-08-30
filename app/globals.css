@@ -7,6 +7,7 @@
 @import './styles/glass.css';
 @import "./styles/video-player.css";
 @import "./styles/search-history.css";
+@import './styles/tv.css';
 @keyframes jiggle {
   0% { transform: rotate(-1deg); }
   50% { transform: rotate(1deg); }
