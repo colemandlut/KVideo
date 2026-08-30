@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useHistory } from '@/lib/store/history-store';
 import { useTvFocus } from '@/lib/tv/TvFocusProvider';
+import { useTvLongPressOk } from '@/lib/tv/useTvLongPressOk';
 import type { VideoHistoryItem } from '@/lib/types';
 
 interface TvHistoryRowProps {
@@ -12,7 +13,6 @@ interface TvHistoryRowProps {
 }
 
 const MAX_ITEMS = 20;
-const LONG_PRESS_MS = 800;
 
 interface TvHistoryCardProps {
   item: VideoHistoryItem;
@@ -32,79 +32,21 @@ interface TvHistoryCardProps {
  * ACTION_UP, so keydown/keyup timing is reliable here. All of the
  * setState calls below happen inside event handlers or a setTimeout
  * callback, never synchronously in a useEffect body.
+ *
+ * The hold-to-delete gesture itself lives in the shared
+ * `useTvLongPressOk` hook (lib/tv/useTvLongPressOk.ts) so TvFavorites can
+ * reuse the exact same tap-window / long-press behaviour instead of forking
+ * it.
  */
 function TvHistoryCard({ item, onSelect, onDelete, setRef }: TvHistoryCardProps) {
   const [imageError, setImageError] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
-  const [isPressing, setIsPressing] = useState(false);
-  const [pressToken, setPressToken] = useState(0);
 
-  // Timer for the pending long-press delete, and a flag so the keyup that
-  // follows a fired long-press doesn't also trigger a short-press select.
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const longPressFiredRef = useRef(false);
-
-  const clearPressTimer = () => {
-    if (timerRef.current !== null) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-  };
-
-  // Never leave a timer running past the card's lifetime.
-  useEffect(() => clearPressTimer, []);
-
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
-    if (event.key !== 'Enter') return;
-
-    // Stop the native click-on-keydown behaviour every time Enter fires for
-    // this button, including auto-repeats - otherwise a held key would keep
-    // re-triggering play on every repeat while the delete timer is running.
-    event.preventDefault();
-
-    // `event.repeat` cannot be trusted here. The Android shell forwards the
-    // D-pad centre button by constructing a brand new KeyEvent for every
-    // auto-repeat:
-    //
-    //   webView.dispatchKeyEvent(KeyEvent(ACTION_DOWN, KEYCODE_ENTER))
-    //
-    // That constructor sets repeatCount to 0, so every repeat reaches the page
-    // looking like a fresh press with `repeat === false`. Relying on it meant a
-    // held key restarted the timer on every repeat, so the progress bar reset
-    // partway and the delete never fired - releasing then behaved as a short
-    // press and started playback instead.
-    //
-    // A press already in flight is the reliable signal, so use that instead.
-    if (timerRef.current !== null || longPressFiredRef.current) return;
-
-    longPressFiredRef.current = false;
-    setIsPressing(true);
-    setPressToken((token) => token + 1);
-
-    clearPressTimer();
-    timerRef.current = setTimeout(() => {
-      timerRef.current = null;
-      longPressFiredRef.current = true;
-      setIsPressing(false);
-      onDelete(item);
-    }, LONG_PRESS_MS);
-  };
-
-  const handleKeyUp = (event: React.KeyboardEvent<HTMLButtonElement>) => {
-    if (event.key !== 'Enter') return;
-
-    const wasLongPress = longPressFiredRef.current;
-    clearPressTimer();
-    setIsPressing(false);
-
-    if (!wasLongPress) {
-      onSelect(item);
-    }
-  };
+  const { isPressing, pressToken, handleKeyDown, handleKeyUp, handleBlur: handlePressBlur } =
+    useTvLongPressOk({ item, onSelect, onLongPress: onDelete });
 
   const handleBlur = () => {
-    clearPressTimer();
-    setIsPressing(false);
+    handlePressBlur();
     setIsFocused(false);
   };
 
