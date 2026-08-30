@@ -4,25 +4,14 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TvFocusProvider, useTvFocus } from '@/lib/tv/TvFocusProvider';
 import { useTvKeys } from '@/lib/tv/useTvKeys';
-import { TvRow } from './TvRow';
+import { TvRow, type TvTag } from './TvRow';
 import { TvRecommendRow } from './TvRecommendRow';
 import { TvHistoryRow } from './TvHistoryRow';
 import { TvSearchResults } from './TvSearchResults';
 import type { TvMovie } from './TvPosterCard';
 import type { Video } from '@/lib/types';
 
-const TV_CATEGORIES = [
-  { id: 'popular', title: '热门', value: '热门' },
-  { id: 'latest', title: '最新', value: '最新' },
-  { id: 'top', title: '豆瓣高分', value: '豆瓣高分' },
-  { id: 'hidden', title: '冷门佳片', value: '冷门佳片' },
-  { id: 'chinese', title: '华语', value: '华语' },
-  { id: 'western', title: '欧美', value: '欧美' },
-  { id: 'korean', title: '韩国', value: '韩国' },
-  { id: 'japanese', title: '日本', value: '日本' },
-];
-
-const TAGS = TV_CATEGORIES.map((c) => ({ id: c.id, label: c.title, value: c.value }));
+const FALLBACK_TAGS: TvTag[] = [{ id: '热门', label: '热门', value: '热门' }];
 
 type ContentType = 'movie' | 'tv';
 
@@ -84,6 +73,41 @@ function TvHomeContent({ query, hasSearched, loading, results, onSearch, onReset
   useTvKeys(true);
 
   const [contentType, setContentType] = useState<ContentType>('movie');
+  const [tags, setTags] = useState<TvTag[] | null>(null);
+
+  // Refetch the category tag list whenever the selected content type
+  // changes - movie and tv use entirely different Douban tag sets. `ignore`
+  // guards against a stale response winning a race: if the user flips
+  // movie -> tv -> movie quickly, the in-flight request for the wrong type
+  // must not overwrite the newer list. All setState calls happen inside the
+  // nested async function (before or after its awaits), never directly in
+  // the effect body, matching the pattern in useTagManager.ts.
+  useEffect(() => {
+    let ignore = false;
+
+    const loadTags = async () => {
+      setTags(null);
+      try {
+        const response = await fetch(`/api/douban/tags?type=${contentType}`);
+        const data = await response.json();
+        if (ignore) return;
+        if (Array.isArray(data.tags) && data.tags.length > 0) {
+          setTags(data.tags.map((label: string) => ({ id: label, label, value: label })));
+        } else {
+          setTags(FALLBACK_TAGS);
+        }
+      } catch (error) {
+        console.error('Fetch tv tags error:', error);
+        if (!ignore) setTags(FALLBACK_TAGS);
+      }
+    };
+
+    loadTags();
+
+    return () => {
+      ignore = true;
+    };
+  }, [contentType]);
 
   // Derived, monotonically-increasing high-water mark of the furthest row
   // reached. Updated during render (not in an effect) so the set of loaded
@@ -119,16 +143,16 @@ function TvHomeContent({ query, hasSearched, loading, results, onSearch, onReset
 
       <TvRecommendRow id="recommend" rowIndex={2} onSelect={handleSelect} />
 
-      {TV_CATEGORIES.map((category, index) => {
+      {tags && tags.map((tag, index) => {
         const rowIndex = index + 3;
         return (
           <TvRow
-            key={category.id}
-            id={category.id}
+            key={tag.id}
+            id={tag.id}
             rowIndex={rowIndex}
-            title={category.title}
-            tagId={category.id}
-            tags={TAGS}
+            title={tag.label}
+            tagId={tag.id}
+            tags={tags}
             contentType={contentType}
             shouldLoad={rowIndex <= Math.max(3, maxRowReached + 1)}
             onSelect={handleSelect}
