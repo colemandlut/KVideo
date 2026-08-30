@@ -177,7 +177,7 @@ export function moveFocus(rows: TvRowMeta[], current: TvFocusPos, dir: TvDirecti
 - [ ] **Step 4: 运行测试，确认通过**
 
 Run: `npm test 2>&1 | tail -8`
-Expected: `pass` 数量比基线（84）多 8，`fail 0`
+Expected: `pass 93`，`fail 0`（基线 84 + 新增 9 个测试）
 
 - [ ] **Step 5: 提交**
 
@@ -907,7 +907,7 @@ git commit -m "feat(tv): route the home page to the TV screen on TV-like devices
 
 ## 完成标准
 
-- `npm test` 全绿，新增 8 个 focus-model 测试
+- `npm test` 全绿，新增 9 个 focus-model 测试（84 → 93）
 - `npx tsc --noEmit` 通过
 - `npx eslint` 在改动文件上无新增 error（基线已有的 `useIsIOS` 的 `any` error 除外）
 - `npm run pages:build` 退出码 0
