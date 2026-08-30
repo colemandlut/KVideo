@@ -33,7 +33,11 @@ export function useTvKeys(enabled: boolean) {
       const element = getElement(next);
       if (element) {
         element.focus({ preventScroll: true });
-        element.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
+        // Instant, not smooth. Smooth scrolling silently no-ops in some WebView
+        // configurations - measured: behavior 'smooth' left scrollY at 0 while
+        // 'auto' scrolled correctly - and an instant snap is the normal feel for
+        // a TV anyway, with no animation cost on weak hardware.
+        element.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'auto' });
       }
     };
 

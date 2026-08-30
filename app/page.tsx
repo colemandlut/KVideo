@@ -38,7 +38,7 @@ function HomePage() {
 
   const { latencies } = useLatencyPing({
     sourceUrls,
-    enabled: hasSearched && results.length > 0 && !isTvLike,
+    enabled: hasSearched && results.length > 0,
   });
 
   if (isTvLike) {
@@ -48,6 +48,7 @@ function HomePage() {
         hasSearched={hasSearched}
         loading={loading}
         results={results}
+        latencies={latencies}
         onSearch={handleSearch}
         onReset={handleReset}
       />

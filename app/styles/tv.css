@@ -14,6 +14,7 @@
   scroll-margin-top: calc(var(--tv-topbar-height) + 16px);
   scroll-margin-left: 32px;
   scroll-margin-right: 32px;
+  scroll-margin-bottom: 96px;
   transition: transform 160ms ease-out, box-shadow 160ms ease-out, opacity 160ms ease-out;
   outline: none;
 }
