@@ -92,8 +92,13 @@ const DESCRIPTION_LINE_HEIGHT = 'h-[18px] leading-[18px]';
  *  description <-> a focused option's description) never changes the row's
  *  height - see OptionRow's focusedIndex handling for why the text changes. */
 function RowDescription({ text }: { text: string }) {
+  // Full width, below the label and options rather than inside the 200px label
+  // column: measured at 960 CSS px, five of the eight descriptions were being
+  // truncated in that column - including "删除观看历史、收藏和本地缓存，无法撤销",
+  // which lost the part that actually matters. A description that gets cut off
+  // is worse than no description, because it still costs a line.
   return (
-    <p className={`mt-1 truncate text-[13px] text-[#9aa0a6] ${DESCRIPTION_LINE_HEIGHT}`}>{text}</p>
+    <p className={`mt-1 px-8 truncate text-[13px] text-[#9aa0a6] ${DESCRIPTION_LINE_HEIGHT}`}>{text}</p>
   );
 }
 
@@ -117,12 +122,12 @@ function OptionRow({ id, rowIndex, label, description, options, value, onChange 
   const focusedDescription = focusedIndex !== null ? options[focusedIndex]?.description : undefined;
 
   return (
-    <div className="flex items-start gap-8 px-8 py-3">
-      <div className="w-[200px] shrink-0">
-        <span className="text-[15px] text-[#e8eaed]">{label}</span>
-        <RowDescription text={focusedDescription ?? description} />
-      </div>
-      <div className="flex flex-wrap gap-3">
+    <div className="py-3">
+      <div className="flex items-center gap-8 px-8">
+        <div className="w-[200px] shrink-0">
+          <span className="text-[15px] text-[#e8eaed]">{label}</span>
+        </div>
+        <div className="flex flex-wrap gap-3">
         {options.map((option, index) => (
           <button
             key={option.value}
@@ -138,8 +143,10 @@ function OptionRow({ id, rowIndex, label, description, options, value, onChange 
           >
             {option.label}
           </button>
-        ))}
+          ))}
+        </div>
       </div>
+      <RowDescription text={focusedDescription ?? description} />
     </div>
   );
 }
@@ -202,11 +209,11 @@ function ConfirmActionRow({ id, rowIndex, label, description, actionLabel, confi
   };
 
   return (
-    <div className="flex items-start gap-8 px-8 py-3">
-      <div className="w-[200px] shrink-0">
-        <span className="text-[15px] text-[#e8eaed]">{label}</span>
-        <RowDescription text={description} />
-      </div>
+    <div className="py-3">
+      <div className="flex items-center gap-8 px-8">
+        <div className="w-[200px] shrink-0">
+          <span className="text-[15px] text-[#e8eaed]">{label}</span>
+        </div>
       <button
         ref={(el) => setItemElement(id, 0, el)}
         type="button"
@@ -217,8 +224,10 @@ function ConfirmActionRow({ id, rowIndex, label, description, actionLabel, confi
         onClick={handleClick}
         onBlur={handleBlur}
       >
-        {confirming ? confirmLabel : actionLabel}
-      </button>
+          {confirming ? confirmLabel : actionLabel}
+        </button>
+      </div>
+      <RowDescription text={description} />
     </div>
   );
 }
