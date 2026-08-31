@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-export const TV_LONG_PRESS_MS = 800;
+export const TV_LONG_PRESS_MS = 1200;
 
 // Releasing before this counts as a quick tap and selects. Releasing after it
 // - once the delete/remove progress bar is on screen - is treated as the user
@@ -10,6 +10,28 @@ export const TV_LONG_PRESS_MS = 800;
 // exactly when the bar appears is what makes the rule visible: if you can see
 // the bar, you have already left tap territory.
 export const TV_LONG_PRESS_TAP_MS = 250;
+
+/**
+ * Set when a long press fires, cleared when the key is finally released.
+ *
+ * A long press removes the focused card, so it unmounts and focus moves to the
+ * next one - while the user is still holding OK. The Android shell rebuilds a
+ * fresh KeyEvent for every auto-repeat, so those repeats reach the newly
+ * focused card looking like a brand new press; releasing a moment later then
+ * read as a quick tap and played that card. This lives at module scope
+ * precisely because it has to outlive the component that was just removed.
+ */
+let suppressUntilKeyUp = false;
+let suppressedAt = 0;
+let releaseListenerAttached = false;
+
+/**
+ * Safety valve. If a keyup is ever missed - focus moving between windows
+ * mid-hold, a dropped event in the WebView - the suppression flag would stay
+ * set and OK would be dead on every card from then on. Treat a suppression
+ * older than this as stale rather than trusting the release to always arrive.
+ */
+const SUPPRESSION_MAX_MS = 5000;
 
 interface UseTvLongPressOkOptions<T> {
   item: T;
@@ -78,6 +100,22 @@ export function useTvLongPressOk<T>({
   // Never leave a timer running past the owning card's lifetime.
   useEffect(() => clearPressTimer, []);
 
+  // The keyup that ends a suppressed hold may land on a different card, or on
+  // <body> if the removed card left focus nowhere, so it cannot be cleared from
+  // this card's own onKeyUp alone. One window-level listener for the whole app
+  // owns that, attached on first use and left in place.
+  useEffect(() => {
+    if (releaseListenerAttached) return;
+    releaseListenerAttached = true;
+    window.addEventListener(
+      'keyup',
+      (event) => {
+        if (event.key === 'Enter') suppressUntilKeyUp = false;
+      },
+      true,
+    );
+  }, []);
+
   const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
     if (event.key !== 'Enter') return;
 
@@ -88,6 +126,10 @@ export function useTvLongPressOk<T>({
 
     // See point 1 above: a press already in flight is the signal, not
     // `event.repeat`.
+    if (suppressUntilKeyUp) {
+      if (Date.now() - suppressedAt < SUPPRESSION_MAX_MS) return;
+      suppressUntilKeyUp = false;
+    }
     if (timerRef.current !== null || longPressFiredRef.current) return;
 
     longPressFiredRef.current = false;
@@ -104,6 +146,8 @@ export function useTvLongPressOk<T>({
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
       longPressFiredRef.current = true;
+      suppressUntilKeyUp = true;
+      suppressedAt = Date.now();
       setIsPressing(false);
       onLongPress(item);
     }, TV_LONG_PRESS_MS);
@@ -111,6 +155,8 @@ export function useTvLongPressOk<T>({
 
   const handleKeyUp = (event: React.KeyboardEvent<HTMLButtonElement>) => {
     if (event.key !== 'Enter') return;
+
+    suppressUntilKeyUp = false;
 
     const wasLongPress = longPressFiredRef.current;
     const heldFor = Date.now() - pressStartRef.current;

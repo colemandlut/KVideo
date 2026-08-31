@@ -74,7 +74,8 @@
 .tv-history-delete-progress {
   width: 0%;
   /* 800ms long-press threshold minus the 250ms tap window. */
-  animation: tv-history-delete-progress 550ms linear forwards;
+  /* 1200ms long-press threshold minus the 250ms tap window. */
+  animation: tv-history-delete-progress 950ms linear forwards;
 }
 
 /* One filter row on /browse. Same left/right walk and hidden scrollbar as
