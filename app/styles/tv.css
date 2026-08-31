@@ -76,3 +76,24 @@
   /* 800ms long-press threshold minus the 250ms tap window. */
   animation: tv-history-delete-progress 550ms linear forwards;
 }
+
+/* One filter row on /browse. Same left/right walk and hidden scrollbar as
+   .tv-row-strip, but tighter vertically: five of these stack above the
+   results grid, and at the TV's real 540 CSS px of height the poster row has
+   to still be on screen when focus lands on 排序. The vertical padding is not
+   decoration - .tv-focusable's focus ring extends 11px past the element, and
+   `overflow-x: auto` computes overflow-y to auto, so anything less clips the
+   ring off the top and bottom of the focused pill. */
+.tv-filter-strip {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 12px;
+  padding: 12px 32px 12px 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tv-filter-strip::-webkit-scrollbar {
+  display: none;
+}
