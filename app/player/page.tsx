@@ -587,6 +587,11 @@ function PlayerContent() {
         sources={groupedSources}
         currentSourceId={currentSourceId || source || ''}
         onSourceChange={handleSourceChange}
+        title={videoData?.vod_name || title || null}
+        poster={videoData?.vod_pic}
+        type={videoData?.type_name}
+        year={videoData?.vod_year}
+        isPremium={isPremium}
       />
     </div>
   );
