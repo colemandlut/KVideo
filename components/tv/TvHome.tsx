@@ -49,12 +49,20 @@ const CHART_ROWS: Record<ContentType, ChartRow[]> = {
  * Visual row order. Rows register themselves by visual index, so inserting a
  * row here shifts every row below it and every index has to move with it.
  * Both content types contribute the same number of chart rows (see
- * CHART_ROWS), which is what keeps ROW_TAG_START a constant.
+ * CHART_ROWS), so the tag rows below them never shift when the type changes.
  */
 const ROW_HISTORY = 1;
 const ROW_RECOMMEND = 2;
 const ROW_CHART_START = 3;
-const ROW_TAG_START = ROW_CHART_START + CHART_ROWS.movie.length;
+// Derived from the *current* content type rather than from CHART_ROWS.movie:
+// the two lists are meant to stay the same length (see above), but if they
+// ever diverge, a start index taken from the wrong list would register every
+// tag row at an index that disagrees with where it actually sits on screen -
+// and a focus model that disagrees with the screen sends the remote to the
+// wrong row with nothing logged.
+function tagStartRow(contentType: ContentType) {
+  return ROW_CHART_START + CHART_ROWS[contentType].length;
+}
 
 interface TopbarRowProps {
   contentType: ContentType;
@@ -275,7 +283,7 @@ function TvHomeContent({ query, hasSearched, loading, results, latencies, onSear
       })}
 
       {tags && tags.map((tag, index) => {
-        const rowIndex = ROW_TAG_START + index;
+        const rowIndex = tagStartRow(contentType) + index;
         return (
           <TvRow
             key={tag.id}
