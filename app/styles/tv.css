@@ -26,7 +26,16 @@
 .tv-focusable:focus {
   opacity: 1;
   transform: scale(1.08);
-  box-shadow: 0 0 0 4px #3b82f6, 0 0 0 8px rgba(59, 130, 246, 0.35);
+  /* White leads, blue follows. A focused item is frequently also the
+   * already-selected one (the 电影/电视剧 pair on the home screen, every
+   * option row on the settings screen), and a selected item's fill is this
+   * same #3b82f6 - a blue-only ring would blend straight into it, hiding
+   * exactly where focus is when the user most needs to see it. White at the
+   * element's edge reads against both the dark #252b36 unselected fill and
+   * the #3b82f6 selected fill, so the ring stops depending on what it
+   * happens to sit on. Do not collapse this back to a single blue ring.
+   */
+  box-shadow: 0 0 0 3px #ffffff, 0 0 0 7px #3b82f6, 0 0 0 11px rgba(59, 130, 246, 0.35);
   z-index: 5;
 }
 
