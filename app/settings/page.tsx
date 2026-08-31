@@ -16,9 +16,13 @@ import { UserSourceSettings } from '@/components/settings/UserSourceSettings';
 import { UserDanmakuSettings } from '@/components/settings/UserDanmakuSettings';
 import { PermissionGate } from '@/components/PermissionGate';
 import { hasPermission } from '@/lib/store/auth-store';
+import { useIsTvLike } from '@/lib/hooks/mobile/useDeviceDetection';
+import { TvSettings } from '@/components/tv/TvSettings';
 import { useSettingsPage } from './hooks/useSettingsPage';
 
 export default function SettingsPage() {
+  const isTvLike = useIsTvLike();
+
   const {
     sources,
     sortBy,
@@ -74,6 +78,10 @@ export default function SettingsPage() {
     blockedCategories,
     handleBlockedCategoriesChange,
   } = useSettingsPage();
+
+  if (isTvLike) {
+    return <TvSettings />;
+  }
 
   return (
     <div className="min-h-screen bg-[var(--bg-color)] bg-[image:var(--bg-image)] bg-fixed">
