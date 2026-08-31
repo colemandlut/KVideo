@@ -39,8 +39,11 @@ function useRowRegistration(id: string, rowIndex: number, length: number) {
   }, [id, rowIndex, length, registerRow, unregisterRow]);
 }
 
-/** Presentational only: renders one focusable skeleton slot. Registers nothing. */
-function TvRowSkeletonView({ title, setRef }: { title: string; setRef: (el: HTMLButtonElement | null) => void }) {
+/** Presentational only: renders one focusable skeleton slot. Registers nothing.
+ *  Exported so other poster rows (TvCollectionRow) share the exact skeleton
+ *  rather than growing a second copy that can drift in size - a skeleton of a
+ *  different height would make the rows jump as they load. */
+export function TvRowSkeletonView({ title, setRef }: { title: string; setRef: (el: HTMLButtonElement | null) => void }) {
   return (
     <section>
       <h2 className="tv-row-title">{title}</h2>

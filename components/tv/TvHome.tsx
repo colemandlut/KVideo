@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { TvFocusProvider, useTvFocus } from '@/lib/tv/TvFocusProvider';
 import { useTvKeys } from '@/lib/tv/useTvKeys';
 import { TvRow, type TvTag } from './TvRow';
+import { TvCollectionRow } from './TvCollectionRow';
 import { TvRecommendRow } from './TvRecommendRow';
 import { TvHistoryRow } from './TvHistoryRow';
 import { TvSearchResults } from './TvSearchResults';
@@ -15,22 +16,74 @@ const FALLBACK_TAGS: TvTag[] = [{ id: '热门', label: '热门', value: '热门'
 
 type ContentType = 'movie' | 'tv';
 
+interface ChartRow {
+  id: string;
+  title: string;
+  collectionId: string;
+}
+
+/**
+ * The Douban charts that sit between 为你推荐 and the tag rows.
+ *
+ * Both content types get the same three slots, so flipping 电影/电视剧 never
+ * moves the rows underneath - a row order that reshuffles under a stationary
+ * highlight is disorienting when the only way to look around is the D-pad.
+ * The lists behind the slots are per type because 榜单 ids are content
+ * specific: leaving movie_top250 mounted while the user is on 电视剧 would
+ * quietly serve films under a TV heading.
+ */
+const CHART_ROWS: Record<ContentType, ChartRow[]> = {
+  movie: [
+    { id: 'chart-0', title: '豆瓣 Top250', collectionId: 'movie_top250' },
+    { id: 'chart-1', title: '正在热映', collectionId: 'movie_showing' },
+    { id: 'chart-2', title: '一周口碑榜', collectionId: 'movie_weekly_best' },
+  ],
+  tv: [
+    { id: 'chart-0', title: '近期热门剧集', collectionId: 'tv_hot' },
+    { id: 'chart-1', title: '国产剧集榜', collectionId: 'tv_domestic' },
+    { id: 'chart-2', title: '近期热门综艺', collectionId: 'show_hot' },
+  ],
+};
+
+/**
+ * Visual row order. Rows register themselves by visual index, so inserting a
+ * row here shifts every row below it and every index has to move with it.
+ * Both content types contribute the same number of chart rows (see
+ * CHART_ROWS), so the tag rows below them never shift when the type changes.
+ */
+const ROW_HISTORY = 1;
+const ROW_RECOMMEND = 2;
+const ROW_CHART_START = 3;
+// Derived from the *current* content type rather than from CHART_ROWS.movie:
+// the two lists are meant to stay the same length (see above), but if they
+// ever diverge, a start index taken from the wrong list would register every
+// tag row at an index that disagrees with where it actually sits on screen -
+// and a focus model that disagrees with the screen sends the remote to the
+// wrong row with nothing logged.
+function tagStartRow(contentType: ContentType) {
+  return ROW_CHART_START + CHART_ROWS[contentType].length;
+}
+
 interface TopbarRowProps {
   contentType: ContentType;
   onContentTypeChange: (type: ContentType) => void;
+  onBrowse: () => void;
   onFavorites: () => void;
   onSettings: () => void;
 }
 
-function TopbarRow({ contentType, onContentTypeChange, onFavorites, onSettings }: TopbarRowProps) {
+function TopbarRow({ contentType, onContentTypeChange, onBrowse, onFavorites, onSettings }: TopbarRowProps) {
   const { registerRow, unregisterRow, setItemElement } = useTvFocus();
 
   const actions = [
     { label: '电影', onClick: () => onContentTypeChange('movie'), selected: contentType === 'movie' },
     { label: '电视剧', onClick: () => onContentTypeChange('tv'), selected: contentType === 'tv' },
+    { label: '分类', onClick: onBrowse, selected: false },
     { label: '收藏', onClick: onFavorites, selected: false },
     { label: '设置', onClick: onSettings, selected: false },
   ];
+  // Derived from the list itself so the registered length can never drift out
+  // of sync with the buttons actually rendered below.
   const length = actions.length;
 
   useEffect(() => {
@@ -161,6 +214,13 @@ function TvHomeContent({ query, hasSearched, loading, results, latencies, onSear
     setMaxRowReached(pos.rowIndex);
   }
 
+  // Every lazy row from the first chart row down to one row past the furthest
+  // row focus has reached. The topmost lazy row always loads so the screen is
+  // never all skeletons; the +1 keeps exactly one row of runway ahead of the
+  // highlight. Charts and tag rows share this so they load in the visual order
+  // the user walks them.
+  const loadedThroughRow = Math.max(ROW_CHART_START, maxRowReached + 1);
+
   const handleSelect = useCallback((movie: TvMovie) => {
     onSearch(movie.title);
   }, [onSearch]);
@@ -169,9 +229,9 @@ function TvHomeContent({ query, hasSearched, loading, results, latencies, onSear
   // on the topbar and the page stays scrolled where it was, nothing visible
   // tells the user the content actually changed. Snap the page back to the
   // top and land focus on the first category row so the switch is obvious.
-  // Row 3 may not exist yet (tags are still loading) - that's fine, clampFocus
-  // keeps `pos` in range and useTvKeys' focus-recovery effect re-asserts DOM
-  // focus once the row registers.
+  // The tag rows may not exist yet (their list is still being fetched) -
+  // that's fine, clampFocus keeps `pos` in range and useTvKeys' focus-recovery
+  // effect re-asserts DOM focus once they register.
   const handleContentTypeChange = useCallback((type: ContentType) => {
     if (type === contentType) return;
     setContentType(type);
@@ -198,16 +258,32 @@ function TvHomeContent({ query, hasSearched, loading, results, latencies, onSear
       <TopbarRow
         contentType={contentType}
         onContentTypeChange={handleContentTypeChange}
+        onBrowse={() => router.push('/browse')}
         onFavorites={() => router.push('/favorites')}
         onSettings={() => router.push('/settings')}
       />
 
-      <TvHistoryRow id="history" rowIndex={1} />
+      <TvHistoryRow id="history" rowIndex={ROW_HISTORY} />
 
-      <TvRecommendRow id="recommend" rowIndex={2} onSelect={handleSelect} />
+      <TvRecommendRow id="recommend" rowIndex={ROW_RECOMMEND} onSelect={handleSelect} />
+
+      {CHART_ROWS[contentType].map((chart, index) => {
+        const rowIndex = ROW_CHART_START + index;
+        return (
+          <TvCollectionRow
+            key={chart.id}
+            id={chart.id}
+            rowIndex={rowIndex}
+            title={chart.title}
+            collectionId={chart.collectionId}
+            shouldLoad={rowIndex <= loadedThroughRow}
+            onSelect={handleSelect}
+          />
+        );
+      })}
 
       {tags && tags.map((tag, index) => {
-        const rowIndex = index + 3;
+        const rowIndex = tagStartRow(contentType) + index;
         return (
           <TvRow
             key={tag.id}
@@ -217,7 +293,7 @@ function TvHomeContent({ query, hasSearched, loading, results, latencies, onSear
             tagId={tag.id}
             tags={tags}
             contentType={contentType}
-            shouldLoad={rowIndex <= Math.max(3, maxRowReached + 1)}
+            shouldLoad={rowIndex <= loadedThroughRow}
             onSelect={handleSelect}
           />
         );
