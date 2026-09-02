@@ -8,3 +8,12 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 # Environment variables can be set here or in Cloudflare Dashboard
+
+# Cast relay. The Durable Object class itself lives in workers/cast-room -
+# Cloudflare does not allow one to be defined inside a Pages project, so this
+# only binds to it. Deploy that Worker first; until then the binding is absent
+# and the cast API falls back to the Redis mailbox on its own.
+[[durable_objects.bindings]]
+name = "CAST_ROOM"
+class_name = "CastRoom"
+script_name = "kvideo-cast-room"

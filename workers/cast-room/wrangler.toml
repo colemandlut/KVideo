@@ -1,0 +1,26 @@
+# Cast relay Worker. Deployed separately from the Pages project, because
+# Cloudflare does not allow a Durable Object class to be defined inside a
+# Pages project - Pages can only bind to one that lives in a Worker.
+#
+# Deploy:  cd workers/cast-room && npx wrangler deploy
+#
+# IMPORTANT: leave workers.dev disabled (below). This Worker does no
+# authentication of its own; the Pages function in front of it does. A public
+# route would expose an unauthenticated relay.
+name = "kvideo-cast-room"
+main = "src/index.ts"
+compatibility_date = "2025-04-01"
+
+workers_dev = false
+
+[[migrations]]
+tag = "v1"
+# SQLite-backed classes are the only kind available on the Workers Free plan.
+# This relay stores nothing, but the backend still has to be declared.
+new_sqlite_classes = ["CastRoom"]
+
+# Lets the Worker address its own namespace; the Pages project declares its own
+# binding to this same class in the root wrangler.toml.
+[[durable_objects.bindings]]
+name = "CAST_ROOM"
+class_name = "CastRoom"
