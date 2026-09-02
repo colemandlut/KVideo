@@ -1,89 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticationRequiredResponse } from '@/lib/server/api-responses';
 import { getServerSession } from '@/lib/server/auth';
+import { getCastRoom } from '@/lib/server/cast-room';
+import { normalizeCastCommand } from '@/lib/server/cast-command';
 import { getRedisClient } from '@/lib/server/redis';
 
 // 确保这行代码在整个文件中只出现一次
 export const runtime = 'edge';
 
-const MAX_TITLE_LENGTH = 300;
 const CAST_TTL_SECONDS = 120;
-
-interface CastCommand {
-  id: string;
-  source: string;
-  title: string;
-  episode: number;
-  t: number;
-  ts: number;
-}
 
 function castUnavailableResponse() {
   return NextResponse.json(
     { error: 'Server-side cast is not configured on this deployment' },
     { status: 503 }
   );
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0;
-}
-
-/**
- * Validates and normalizes a candidate cast command.
- *
- * Used by both POST (validating the client's request body, with a
- * server-generated `overrideTs`) and GET (validating whatever came back out
- * of Redis, which may be a stale or foreign-shaped value left by another
- * project sharing this database) so the two paths cannot drift apart.
- */
-function normalizeCastCommand(value: unknown, overrideTs?: number): CastCommand | null {
-  if (!value || typeof value !== 'object') {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  const { id, source, title, episode, t } = record;
-  const ts = overrideTs ?? record.ts;
-
-  if (
-    (typeof id !== 'string' && typeof id !== 'number') ||
-    (typeof id === 'string' && id.trim().length === 0)
-  ) {
-    return null;
-  }
-  if (!isNonEmptyString(source) || !isNonEmptyString(title)) {
-    return null;
-  }
-  if (typeof ts !== 'number' || !Number.isFinite(ts)) {
-    return null;
-  }
-
-  let episodeNum = 0;
-  if (episode !== undefined && episode !== null) {
-    episodeNum = Number(episode);
-    if (!Number.isInteger(episodeNum) || episodeNum < 0) {
-      return null;
-    }
-  }
-
-  let tNum = 0;
-  if (t !== undefined && t !== null) {
-    tNum = Number(t);
-    if (!Number.isFinite(tNum)) {
-      return null;
-    }
-  }
-  tNum = Math.max(0, tNum);
-
-  return {
-    id: String(id),
-    source: source.trim(),
-    title: title.trim().slice(0, MAX_TITLE_LENGTH),
-    episode: episodeNum,
-    t: tNum,
-    ts,
-  };
 }
 
 function castKey(profileId: string) {
@@ -98,29 +29,61 @@ export async function POST(request: NextRequest) {
     return authenticationRequiredResponse();
   }
 
+  const room = getCastRoom(profileId);
   const redis = getRedisClient();
-  if (!redis) {
+
+  if (!room && !redis) {
     return castUnavailableResponse();
   }
 
+  let command;
   try {
-    const body = await request.json();
-    const command = normalizeCastCommand(body, Date.now());
-
-    if (!command) {
-      return NextResponse.json(
-        { error: 'Invalid cast payload: id, source and title are required' },
-        { status: 400 }
-      );
-    }
-
-    await redis.set(castKey(profileId), command, { ex: CAST_TTL_SECONDS });
-
-    return NextResponse.json({ success: true, ts: command.ts });
-  } catch (error) {
-    console.error('Redis Cast Set Error:', error);
-    return NextResponse.json({ error: 'Failed to save cast command' }, { status: 500 });
+    command = normalizeCastCommand(await request.json(), Date.now());
+  } catch {
+    command = null;
   }
+
+  if (!command) {
+    return NextResponse.json(
+      { error: 'Invalid cast payload: id, source and title are required' },
+      { status: 400 }
+    );
+  }
+
+  // Push first: a connected TV starts playing immediately instead of waiting
+  // out a poll interval.
+  let delivered = 0;
+  if (room) {
+    try {
+      const response = await room.fetch(
+        new Request('https://cast-room/broadcast', {
+          method: 'POST',
+          body: JSON.stringify(command),
+          headers: { 'content-type': 'application/json' },
+        })
+      );
+      const result = (await response.json()) as { delivered?: number };
+      delivered = typeof result.delivered === 'number' ? result.delivered : 0;
+    } catch (error) {
+      console.error('Cast relay error:', error);
+    }
+  }
+
+  // Nobody was listening on a socket. That does not mean nobody is listening:
+  // a TV whose WebSocket failed to connect falls back to polling the mailbox,
+  // and pushing into an empty room would drop the command on the floor for it.
+  // So the mailbox is still written whenever the push reached no one - one
+  // Redis write in the uncommon case, instead of one on every single poll.
+  if (delivered === 0 && redis) {
+    try {
+      await redis.set(castKey(profileId), command, { ex: CAST_TTL_SECONDS });
+    } catch (error) {
+      console.error('Redis Cast Set Error:', error);
+      return NextResponse.json({ error: 'Failed to save cast command' }, { status: 500 });
+    }
+  }
+
+  return NextResponse.json({ success: true, ts: command.ts, delivered });
 }
 
 export async function GET(request: NextRequest) {
