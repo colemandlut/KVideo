@@ -188,11 +188,33 @@ export function TvCastReceiver() {
     let reconnectId: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
 
-    const openSocket = () => {
+    // The socket does not live on this origin: next-on-pages cannot return a
+    // 101 upgrade from a Next route handler, so the relay Worker terminates it
+    // on its own hostname. A cookie cannot reach a different origin, so the
+    // app mints a signed one-minute ticket instead. Every connect attempt
+    // fetches a fresh one - reusing a ticket across a backoff would present an
+    // expired one and look like an auth failure.
+    const openSocket = async () => {
       if (closed || typeof WebSocket === 'undefined') return;
 
-      const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(`${scheme}//${window.location.host}/api/cast/socket`);
+      let endpoint: { url: string; ticket: string };
+      try {
+        const res = await fetch('/api/cast/ticket');
+        if (closed) return;
+        if (res.status === 503 || res.status === 401) {
+          startPolling();
+          return;
+        }
+        if (!res.ok) throw new Error(`ticket ${res.status}`);
+        endpoint = (await res.json()) as { url: string; ticket: string };
+      } catch {
+        scheduleReconnect();
+        return;
+      }
+
+      if (closed) return;
+
+      const ws = new WebSocket(`${endpoint.url}?ticket=${encodeURIComponent(endpoint.ticket)}`);
       socket = ws;
 
       ws.onopen = () => {
@@ -227,16 +249,7 @@ export function TvCastReceiver() {
       ws.onclose = () => {
         socket = null;
         if (closed) return;
-
-        failures += 1;
-        if (failures >= SOCKET_MAX_FAILURES) {
-          console.info('[TvCastReceiver] Push socket unavailable; falling back to polling.');
-          startPolling();
-          return;
-        }
-
-        reconnectId = setTimeout(openSocket, backoff);
-        backoff = Math.min(backoff * 2, SOCKET_BACKOFF_MAX_MS);
+        scheduleReconnect();
       };
 
       ws.onerror = () => {
@@ -244,14 +257,25 @@ export function TvCastReceiver() {
       };
     };
 
-    // A plain GET tells the two "no socket" cases apart, which the WebSocket
-    // API itself cannot: 503 means this deployment has no relay bound at all
-    // (poll forever), while 426 means the relay is there and simply wants an
-    // upgrade. Guessing from a failed handshake instead would make an
-    // unconfigured deployment retry the socket for the life of the page.
+    const scheduleReconnect = () => {
+      failures += 1;
+      if (failures >= SOCKET_MAX_FAILURES) {
+        console.info('[TvCastReceiver] Push socket unavailable; falling back to polling.');
+        startPolling();
+        return;
+      }
+      reconnectId = setTimeout(() => void openSocket(), backoff);
+      backoff = Math.min(backoff * 2, SOCKET_BACKOFF_MAX_MS);
+    };
+
+    // Asking for a ticket first tells the two "no socket" cases apart, which
+    // the WebSocket API itself cannot: 503 means this deployment has no relay
+    // configured (poll forever), 401 means nobody has logged in yet. Guessing
+    // from a failed handshake instead would make an unconfigured deployment
+    // retry the socket for the life of the page.
     const chooseTransport = async () => {
       try {
-        const res = await fetch('/api/cast/socket');
+        const res = await fetch('/api/cast/ticket');
         if (closed) return;
 
         if (res.status === 503) {
@@ -267,7 +291,7 @@ export function TvCastReceiver() {
           return;
         }
 
-        openSocket();
+        void openSocket();
       } catch {
         startPolling();
       }
@@ -285,7 +309,7 @@ export function TvCastReceiver() {
         clearTimeout(reconnectId);
         reconnectId = null;
       }
-      openSocket();
+      void openSocket();
     };
 
     document.addEventListener('visibilitychange', onVisible);
