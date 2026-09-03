@@ -1,0 +1,1 @@
+var e={},c=(s,a,u)=>(e.__chunk_4147=(_,r,t)=>{"use strict";t.d(r,{n:()=>o});var n=t(3135);function o(){return n.Rp.json({error:"Authentication required"},{status:401})}},e);export{c as __getNamedExports};

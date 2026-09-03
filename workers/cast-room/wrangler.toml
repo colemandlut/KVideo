@@ -4,14 +4,18 @@
 #
 # Deploy:  cd workers/cast-room && npx wrangler deploy
 #
-# IMPORTANT: leave workers.dev disabled (below). This Worker does no
-# authentication of its own; the Pages function in front of it does. A public
-# route would expose an unauthenticated relay.
+# This Worker IS publicly reachable, and has to be: the TV's WebSocket cannot
+# be served from the Pages app (next-on-pages cannot return a 101 upgrade from
+# a Next route handler). It authenticates callers itself with a signed
+# short-lived ticket the Pages app issues - see src/index.ts. Nothing here
+# trusts a client-supplied profileId.
+#
+# Set the shared secret with:  npx wrangler secret put CAST_TICKET_SECRET
 name = "kvideo-cast-room"
 main = "src/index.ts"
 compatibility_date = "2025-04-01"
 
-workers_dev = false
+workers_dev = true
 
 [[migrations]]
 tag = "v1"
