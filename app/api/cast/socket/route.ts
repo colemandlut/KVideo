@@ -42,7 +42,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Expected a websocket upgrade' }, { status: 426 });
   }
 
-  // Forwarded as-is so the upgrade headers survive; the Durable Object returns
-  // the 101 with the client half of the socket pair attached.
-  return room.fetch(new Request('https://cast-room/socket', request));
+  // The ORIGINAL request object, not a copy addressed to a tidier URL.
+  // Wrapping it in `new Request(url, request)` copies the Upgrade header but
+  // not the upgrade itself - the runtime tracks that on the request object -
+  // so the Durable Object received what looked like an ordinary GET and threw
+  // when it answered with a 101 carrying a socket. The handshake then failed
+  // with a bare 1006 on the client, and the TV quietly fell back to polling,
+  // which is indistinguishable from "casting works, just slowly".
+  return room.fetch(request);
 }

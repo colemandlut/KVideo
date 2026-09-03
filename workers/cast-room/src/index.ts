@@ -33,7 +33,10 @@ export class CastRoom extends DurableObject {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
-    if (url.pathname === '/socket') {
+    // endsWith, not equality: the upgrade arrives as the caller's own request
+    // object (see app/api/cast/socket/route.ts for why it cannot be rewritten),
+    // so the path here is the site's /api/cast/socket.
+    if (url.pathname.endsWith('/socket')) {
       if (request.headers.get('Upgrade') !== 'websocket') {
         return new Response('Expected websocket upgrade', { status: 426 });
       }
