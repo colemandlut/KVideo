@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TvFocusProvider, useTvFocus } from '@/lib/tv/TvFocusProvider';
 import { useTvKeys } from '@/lib/tv/useTvKeys';
+import { TV_NAME_OPTIONS, useTvName, writeTvName } from '@/lib/tv/tv-name';
 import { useSettingsPage } from '@/app/settings/hooks/useSettingsPage';
 import { useTheme } from '@/components/ThemeProvider';
 import { useRuntimeFeatures } from '@/components/RuntimeFeaturesProvider';
@@ -25,12 +26,13 @@ const ROW = {
   back: 0,
   fullscreenType: 1,
   proxyMode: 2,
-  theme: 3,
-  locale: 4,
-  realtimeLatency: 5,
-  searchDisplayMode: 6,
-  clearData: 7,
-  logout: 8,
+  tvName: 3,
+  theme: 4,
+  locale: 5,
+  realtimeLatency: 6,
+  searchDisplayMode: 7,
+  clearData: 8,
+  logout: 9,
 } as const;
 
 /** Exactly one component may own the registration for a given row id - a
@@ -233,6 +235,8 @@ function ConfirmActionRow({ id, rowIndex, label, description, actionLabel, confi
 }
 
 function TvSettingsContent() {
+  const tvName = useTvName();
+
   const router = useRouter();
   useTvKeys(true);
 
@@ -315,6 +319,15 @@ function TvSettingsContent() {
       </PermissionGate>
 
       <SectionTitle>显示</SectionTitle>
+      <OptionRow
+        id="tv-name"
+        rowIndex={ROW.tvName}
+        label="电视名称"
+        description="手机投屏时用这个名字认出这台电视，家里有多台时才需要区分"
+        value={tvName}
+        onChange={writeTvName}
+        options={TV_NAME_OPTIONS.map((name) => ({ value: name, label: name }))}
+      />
       <OptionRow
         id="tv-theme"
         rowIndex={ROW.theme}

@@ -21,6 +21,9 @@ export function PlayerNavbar({ isPremium }: { isPremium?: boolean }) {
 
     const [castAvailable, setCastAvailable] = useState(true);
     const [castState, setCastState] = useState<CastState>('idle');
+    // Non-null while the phone is asking which TV to cast to. Only ever set
+    // when more than one is connected - a single-TV home never sees a list.
+    const [castTargets, setCastTargets] = useState<{ id: string; name: string }[] | null>(null);
     const castResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Probe once on mount: if server-side cast isn't configured (503) or the
@@ -62,7 +65,7 @@ export function PlayerNavbar({ isPremium }: { isPremium?: boolean }) {
         };
     }, []);
 
-    const handleCast = async () => {
+    const sendCast = async (targetId?: string) => {
         const id = searchParams.get('id');
         const source = searchParams.get('source');
         const title = searchParams.get('title') ?? '';
@@ -74,13 +77,14 @@ export function PlayerNavbar({ isPremium }: { isPremium?: boolean }) {
 
         const t = Math.floor(document.querySelector('video')?.currentTime ?? 0);
 
+        setCastTargets(null);
         setCastState('sending');
 
         try {
             const res = await fetch('/api/cast', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id, source, title, episode, t }),
+                body: JSON.stringify({ id, source, title, episode, t, targetId }),
             });
 
             setCastState(res.ok ? 'sent' : 'error');
@@ -92,6 +96,29 @@ export function PlayerNavbar({ isPremium }: { isPremium?: boolean }) {
             clearTimeout(castResetTimeoutRef.current);
         }
         castResetTimeoutRef.current = setTimeout(() => setCastState('idle'), CAST_FEEDBACK_MS);
+    };
+
+    const handleCast = async () => {
+        // Ask which TVs are awake on this network first. One TV (or none, or a
+        // deployment with no relay) casts straight away - making everyone tap
+        // through a one-item list would be worse than the old behaviour. The
+        // lookup is also allowed to fail: casting without a target still
+        // reaches every TV in the room, which is what used to happen anyway.
+        try {
+            const res = await fetch('/api/cast/targets');
+            if (res.ok) {
+                const data = (await res.json()) as { targets?: { id: string; name: string }[] };
+                const targets = data.targets ?? [];
+                if (targets.length > 1) {
+                    setCastTargets(targets);
+                    return;
+                }
+            }
+        } catch {
+            // Fall through and cast to the whole room.
+        }
+
+        void sendCast();
     };
 
     const showCastButton = !isTvLike && castAvailable;
@@ -159,6 +186,49 @@ export function PlayerNavbar({ isPremium }: { isPremium?: boolean }) {
                     </div>
                 </div>
             </div>
+
+            {/* Only rendered when more than one TV is awake on this network.
+                A plain overlay rather than a portal/dialog component: this
+                navbar sits above a video that may be in fullscreen, and a
+                portal to document.body would render behind the fullscreen
+                element. */}
+            {castTargets && (
+                <div
+                    className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/60 p-4"
+                    onClick={() => setCastTargets(null)}
+                    role="presentation"
+                >
+                    <div
+                        className="w-full max-w-xs rounded-2xl bg-[var(--card-bg,#1f2430)] p-4 shadow-xl"
+                        onClick={(event) => event.stopPropagation()}
+                        role="dialog"
+                        aria-label="选择投屏的电视"
+                    >
+                        <p className="mb-3 text-center text-sm text-[var(--text-color,#e8eaed)]">
+                            投屏到哪台电视？
+                        </p>
+                        <div className="flex flex-col gap-2">
+                            {castTargets.map((target) => (
+                                <button
+                                    key={target.id}
+                                    type="button"
+                                    className="w-full rounded-xl bg-[color-mix(in_srgb,var(--accent-color)_15%,transparent)] px-4 py-3 text-left text-[15px] text-[var(--text-color,#e8eaed)]"
+                                    onClick={() => void sendCast(target.id)}
+                                >
+                                    {target.name}
+                                </button>
+                            ))}
+                        </div>
+                        <button
+                            type="button"
+                            className="mt-3 w-full rounded-xl px-4 py-2 text-center text-sm text-[var(--text-secondary,#9aa0a6)]"
+                            onClick={() => setCastTargets(null)}
+                        >
+                            取消
+                        </button>
+                    </div>
+                </div>
+            )}
         </nav>
     );
 }

@@ -18,13 +18,34 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 
+const MAX_NAME_LENGTH = 40;
+const DEFAULT_TV_NAME = '电视';
+
+interface SocketInfo {
+  id: string;
+  name: string;
+}
+
+/**
+ * A socket that predates attachments, or whose attachment failed to
+ * deserialize, still has to appear in the list - otherwise a TV would be
+ * invisible to the phone and simply unreachable.
+ */
+function readSocketInfo(ws: WebSocket): SocketInfo {
+  const raw = ws.deserializeAttachment() as Partial<SocketInfo> | null;
+  return {
+    id: typeof raw?.id === 'string' ? raw.id : '',
+    name: typeof raw?.name === 'string' && raw.name ? raw.name : DEFAULT_TV_NAME,
+  };
+}
+
 interface Env {
   CAST_ROOM: DurableObjectNamespace;
   CAST_TICKET_SECRET: string;
 }
 
 interface TicketPayload {
-  profileId: string;
+  room: string;
   exp: number;
 }
 
@@ -35,11 +56,12 @@ function base64UrlToBytes(value: string): Uint8Array {
 }
 
 /**
- * Returns the profileId a ticket vouches for, or null.
+ * Returns the room a ticket vouches for, or null.
  *
  * Verification is by recomputing the signature, so a forged or edited ticket
- * simply does not match. `profileId` is read only after that check passes -
- * nothing a client sends is ever used to pick which room it lands in.
+ * simply does not match. The room is read only after that check passes -
+ * nothing a client sends is ever used to pick which room it lands in, which is
+ * what keeps one household's TVs unreachable from another's phone.
  */
 async function verifyTicket(ticket: string, secret: string): Promise<string | null> {
   const [encoded, signature] = ticket.split('.');
@@ -68,9 +90,9 @@ async function verifyTicket(ticket: string, secret: string): Promise<string | nu
 
   try {
     const payload = JSON.parse(new TextDecoder().decode(base64UrlToBytes(encoded))) as TicketPayload;
-    if (typeof payload.profileId !== 'string' || !payload.profileId) return null;
+    if (typeof payload.room !== 'string' || !payload.room) return null;
     if (typeof payload.exp !== 'number' || payload.exp < Date.now()) return null;
-    return payload.profileId;
+    return payload.room;
   } catch {
     return null;
   }
@@ -101,12 +123,35 @@ export class CastRoom extends DurableObject {
       // costs nothing.
       this.ctx.acceptWebSocket(server);
 
+      // Attached rather than held in a field: the object is evicted from memory
+      // while sockets stay open, and an attachment is the only per-socket state
+      // that survives that. A plain Map would come back empty and every TV
+      // would lose its name the first time the room went idle.
+      server.serializeAttachment({
+        id: crypto.randomUUID(),
+        name: (url.searchParams.get('name') || '').slice(0, MAX_NAME_LENGTH) || DEFAULT_TV_NAME,
+      } satisfies SocketInfo);
+
       return new Response(null, { status: 101, webSocket: client });
     }
 
+    if (url.pathname.endsWith('/targets')) {
+      return Response.json({
+        targets: this.ctx.getWebSockets().map((ws) => readSocketInfo(ws)),
+      });
+    }
+
     if (url.pathname.endsWith('/broadcast') && request.method === 'POST') {
-      const command = await request.json();
-      const sockets = this.ctx.getWebSockets();
+      const { command, targetId } = (await request.json()) as {
+        command: unknown;
+        targetId?: string;
+      };
+
+      // No target means every TV in the room, which is what a one-TV home wants
+      // and what the phone sends when it did not need to ask.
+      const sockets = this.ctx
+        .getWebSockets()
+        .filter((ws) => !targetId || readSocketInfo(ws).id === targetId);
       const payload = JSON.stringify({ type: 'cast', command });
 
       let delivered = 0;
@@ -169,12 +214,12 @@ export default {
       return new Response('Missing ticket', { status: 401 });
     }
 
-    const profileId = await verifyTicket(ticket, env.CAST_TICKET_SECRET);
-    if (!profileId) {
+    const room = await verifyTicket(ticket, env.CAST_TICKET_SECRET);
+    if (!room) {
       return new Response('Invalid or expired ticket', { status: 401 });
     }
 
-    const stub = env.CAST_ROOM.get(env.CAST_ROOM.idFromName(profileId));
+    const stub = env.CAST_ROOM.get(env.CAST_ROOM.idFromName(room));
     return stub.fetch(request);
   },
 };

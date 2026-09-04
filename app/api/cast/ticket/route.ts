@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticationRequiredResponse } from '@/lib/server/api-responses';
 import { getServerSession } from '@/lib/server/auth';
+import { deriveCastRoomKey, readClientAddress } from '@/lib/server/cast-room-key';
 import { createCastTicket } from '@/lib/server/cast-ticket';
 import { getRuntimeEnvValue } from '@/lib/server/runtime-env';
 
@@ -36,7 +37,10 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const ticket = await createCastTicket(profileId, secret, Date.now());
+  // The address seen here is the TV's own, so the room it joins is the one the
+  // phones on that same network will post into.
+  const room = await deriveCastRoomKey(profileId, readClientAddress(request));
+  const ticket = await createCastTicket(room, secret, Date.now());
 
   return NextResponse.json(
     { url: `wss://${host}/socket`, ticket },

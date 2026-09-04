@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useIsTvLike } from '@/lib/hooks/mobile/useDeviceDetection';
+import { readTvName } from '@/lib/tv/tv-name';
 
 const POLL_INTERVAL_MS = 5000;
 // Reconnect backoff for the push socket, capped so a TV that lost the network
@@ -221,7 +222,12 @@ export function TvCastReceiver() {
 
       if (closed) return;
 
-      const ws = new WebSocket(`${endpoint.url}?ticket=${encodeURIComponent(endpoint.ticket)}`);
+      // Read at connect time, not at mount: renaming the TV in settings then
+      // takes effect on the next reconnect rather than needing a restart.
+      const ws = new WebSocket(
+        `${endpoint.url}?ticket=${encodeURIComponent(endpoint.ticket)}`
+        + `&name=${encodeURIComponent(readTvName())}`
+      );
       socket = ws;
 
       ws.onopen = () => {
