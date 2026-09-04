@@ -323,7 +323,7 @@ function TvSettingsContent() {
         id="tv-name"
         rowIndex={ROW.tvName}
         label="电视名称"
-        description="手机投屏时用这个名字认出这台电视，家里有多台时才需要区分"
+        description="手机投屏时用这个名字认出这台电视。首次连接会自动分配「电视1」「电视2」，可在此改成固定名字"
         value={tvName}
         onChange={writeTvName}
         options={TV_NAME_OPTIONS.map((name) => ({ value: name, label: name }))}

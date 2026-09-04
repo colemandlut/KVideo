@@ -19,24 +19,42 @@
 import { DurableObject } from 'cloudflare:workers';
 
 const MAX_NAME_LENGTH = 40;
-const DEFAULT_TV_NAME = '电视';
+const NAME_PREFIX = '电视';
+/** Bounds the search for a free number so a corrupt room can never spin. */
+const MAX_AUTO_NAME = 99;
 
 interface SocketInfo {
+  /** The TV's own permanent code, so it keeps one identity across reconnects. */
   id: string;
   name: string;
 }
 
 /**
- * A socket that predates attachments, or whose attachment failed to
- * deserialize, still has to appear in the list - otherwise a TV would be
- * invisible to the phone and simply unreachable.
+ * A socket whose attachment is missing or malformed still has to appear in the
+ * list - otherwise a TV would be invisible to the phone and unreachable.
  */
 function readSocketInfo(ws: WebSocket): SocketInfo {
   const raw = ws.deserializeAttachment() as Partial<SocketInfo> | null;
   return {
     id: typeof raw?.id === 'string' ? raw.id : '',
-    name: typeof raw?.name === 'string' && raw.name ? raw.name : DEFAULT_TV_NAME,
+    name: typeof raw?.name === 'string' && raw.name ? raw.name : NAME_PREFIX,
   };
+}
+
+/**
+ * The lowest 电视N not already taken in this room.
+ *
+ * Names are compared against every TV the room has ever seen, not just the
+ * ones currently connected: two sets that are never awake together should
+ * still be 电视1 and 电视2 rather than both claiming 电视1 and becoming
+ * indistinguishable in the phone's list.
+ */
+function nextAutoName(taken: Set<string>): string {
+  for (let n = 1; n <= MAX_AUTO_NAME; n += 1) {
+    const candidate = `${NAME_PREFIX}${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return `${NAME_PREFIX}${MAX_AUTO_NAME}`;
 }
 
 interface Env {
@@ -108,6 +126,32 @@ export class CastRoom extends DurableObject {
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
   }
 
+  /**
+   * The name this device should use, remembered per device code.
+   *
+   * A device that asks for a specific name (the user picked one in settings)
+   * gets it. Otherwise the first connect is assigned the lowest free 电视N and
+   * that sticks, so a set does not get renumbered every time the room's
+   * membership changes.
+   */
+  private async resolveName(deviceId: string, requested: string): Promise<string> {
+    const names = ((await this.ctx.storage.get('names')) ?? {}) as Record<string, string>;
+
+    if (requested) {
+      if (names[deviceId] !== requested) {
+        await this.ctx.storage.put('names', { ...names, [deviceId]: requested });
+      }
+      return requested;
+    }
+
+    const known = names[deviceId];
+    if (known) return known;
+
+    const assigned = nextAutoName(new Set(Object.values(names)));
+    await this.ctx.storage.put('names', { ...names, [deviceId]: assigned });
+    return assigned;
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
@@ -115,6 +159,14 @@ export class CastRoom extends DurableObject {
       if (request.headers.get('Upgrade') !== 'websocket') {
         return new Response('Expected websocket upgrade', { status: 426 });
       }
+
+      const deviceId = (url.searchParams.get('deviceId') || '').slice(0, 100);
+      if (!deviceId) {
+        return new Response('Missing deviceId', { status: 400 });
+      }
+
+      const requested = (url.searchParams.get('name') || '').slice(0, MAX_NAME_LENGTH);
+      const name = await this.resolveName(deviceId, requested);
 
       const [client, server] = Object.values(new WebSocketPair());
 
@@ -127,10 +179,11 @@ export class CastRoom extends DurableObject {
       // while sockets stay open, and an attachment is the only per-socket state
       // that survives that. A plain Map would come back empty and every TV
       // would lose its name the first time the room went idle.
-      server.serializeAttachment({
-        id: crypto.randomUUID(),
-        name: (url.searchParams.get('name') || '').slice(0, MAX_NAME_LENGTH) || DEFAULT_TV_NAME,
-      } satisfies SocketInfo);
+      server.serializeAttachment({ id: deviceId, name } satisfies SocketInfo);
+
+      // Tell the TV what it ended up being called, so it can remember the name
+      // and present the same one next time rather than being renumbered.
+      server.send(JSON.stringify({ type: 'hello', name }));
 
       return new Response(null, { status: 101, webSocket: client });
     }
