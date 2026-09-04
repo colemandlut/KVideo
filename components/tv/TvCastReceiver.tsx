@@ -9,9 +9,10 @@ const POLL_INTERVAL_MS = 5000;
 // for an hour still comes back on its own without hammering the edge.
 const SOCKET_BACKOFF_START_MS = 1000;
 const SOCKET_BACKOFF_MAX_MS = 30000;
-// After this many consecutive failures the socket is judged unavailable on
-// this network and polling takes over, so casting degrades instead of dying.
-const SOCKET_MAX_FAILURES = 3;
+// How long to wait before asking for a ticket again when nobody has logged in
+// yet. This receiver is mounted outside the password gate, so on a cold start
+// it runs before there is a session.
+const TICKET_RETRY_WHILE_UNAUTHENTICATED_MS = 30000;
 // 6 skipped ticks -> roughly one probe every 30s while logged out.
 const TICKS_WHILE_UNAUTHENTICATED = 6;
 
@@ -184,7 +185,6 @@ export function TvCastReceiver() {
 
     let socket: WebSocket | null = null;
     let backoff = SOCKET_BACKOFF_START_MS;
-    let failures = 0;
     let reconnectId: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
 
@@ -201,8 +201,15 @@ export function TvCastReceiver() {
       try {
         const res = await fetch('/api/cast/ticket');
         if (closed) return;
-        if (res.status === 503 || res.status === 401) {
+        if (res.status === 503) {
           startPolling();
+          return;
+        }
+        if (res.status === 401) {
+          // Session gone (logged out, or expired mid-session). Ask again later
+          // rather than polling the mailbox - the ticket endpoint costs no
+          // Redis, so waiting is free and recovery is automatic.
+          reconnectId = setTimeout(() => void openSocket(), TICKET_RETRY_WHILE_UNAUTHENTICATED_MS);
           return;
         }
         if (!res.ok) throw new Error(`ticket ${res.status}`);
@@ -222,7 +229,6 @@ export function TvCastReceiver() {
         // Resetting it in onclose would turn a server that accepts and then
         // immediately drops us into a tight reconnect loop.
         backoff = SOCKET_BACKOFF_START_MS;
-        failures = 0;
       };
 
       ws.onmessage = (event) => {
@@ -257,13 +263,14 @@ export function TvCastReceiver() {
       };
     };
 
+    // Retries the socket forever rather than ever handing over to polling.
+    // Polling is the expensive path: it costs one Redis command every five
+    // seconds for as long as the TV is awake, which on a set that stays on all
+    // month is more commands than the free tier allows. A socket that keeps
+    // failing costs one attempt per backoff interval and no Redis at all, so
+    // retrying is both cheaper and self-healing - the moment the network comes
+    // back, casting works again without a reload.
     const scheduleReconnect = () => {
-      failures += 1;
-      if (failures >= SOCKET_MAX_FAILURES) {
-        console.info('[TvCastReceiver] Push socket unavailable; falling back to polling.');
-        startPolling();
-        return;
-      }
       reconnectId = setTimeout(() => void openSocket(), backoff);
       backoff = Math.min(backoff * 2, SOCKET_BACKOFF_MAX_MS);
     };
@@ -274,6 +281,13 @@ export function TvCastReceiver() {
     // from a failed handshake instead would make an unconfigured deployment
     // retry the socket for the life of the page.
     const chooseTransport = async () => {
+      // A browser with no WebSocket at all is the one case that still needs
+      // the mailbox; everything else uses the socket or waits for it.
+      if (typeof WebSocket === 'undefined') {
+        startPolling();
+        return;
+      }
+
       try {
         const res = await fetch('/api/cast/ticket');
         if (closed) return;
@@ -284,16 +298,16 @@ export function TvCastReceiver() {
         }
 
         if (res.status === 401) {
-          // Mounted outside the password gate; poll (which backs off while
-          // unauthenticated) until a session exists, then the next mount or
-          // visibility change retries the socket.
-          startPolling();
+          reconnectId = setTimeout(() => void openSocket(), TICKET_RETRY_WHILE_UNAUTHENTICATED_MS);
           return;
         }
 
         void openSocket();
       } catch {
-        startPolling();
+        // A failed fetch here is a network blip, not a verdict on the
+        // deployment. Retrying keeps a momentary outage from pinning the TV to
+        // the Redis path for the rest of the session.
+        scheduleReconnect();
       }
     };
 
@@ -303,7 +317,6 @@ export function TvCastReceiver() {
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return;
       if (closed || socket !== null || intervalId !== null) return;
-      failures = 0;
       backoff = SOCKET_BACKOFF_START_MS;
       if (reconnectId !== null) {
         clearTimeout(reconnectId);
