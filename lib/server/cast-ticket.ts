@@ -11,14 +11,16 @@
  * hostname, and a cookie cannot travel there because it is a different origin.
  *
  * So Pages authenticates as usual and mints a ticket the Worker can verify on
- * its own: profileId plus an expiry, signed with a secret both sides share.
- * The Worker never trusts a client-supplied profileId.
+ * its own: the room key plus an expiry, signed with a secret both sides share.
+ * The room is decided entirely on the Pages side and only read after the
+ * signature checks out, so nothing a client sends chooses where it lands.
  */
 
 const TICKET_TTL_MS = 60_000;
 
 interface TicketPayload {
-  profileId: string;
+  /** Which room to join - see lib/server/cast-room-key.ts. */
+  room: string;
   exp: number;
 }
 
@@ -45,8 +47,8 @@ async function sign(payload: string, secret: string): Promise<string> {
  * one issuer, one verifier and one algorithm here, and a hand-rolled header
  * would only add a place for an "alg: none" style mistake to hide.
  */
-export async function createCastTicket(profileId: string, secret: string, now: number): Promise<string> {
-  const payload: TicketPayload = { profileId, exp: now + TICKET_TTL_MS };
+export async function createCastTicket(room: string, secret: string, now: number): Promise<string> {
+  const payload: TicketPayload = { room, exp: now + TICKET_TTL_MS };
   const encoded = base64UrlEncode(new TextEncoder().encode(JSON.stringify(payload)));
   return `${encoded}.${await sign(encoded, secret)}`;
 }

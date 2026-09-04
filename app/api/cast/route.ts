@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticationRequiredResponse } from '@/lib/server/api-responses';
 import { getServerSession } from '@/lib/server/auth';
 import { getCastRoom } from '@/lib/server/cast-room';
+import { deriveCastRoomKey, readClientAddress } from '@/lib/server/cast-room-key';
 import { normalizeCastCommand } from '@/lib/server/cast-command';
 import { getRedisClient } from '@/lib/server/redis';
 
@@ -29,7 +30,10 @@ export async function POST(request: NextRequest) {
     return authenticationRequiredResponse();
   }
 
-  const room = getCastRoom(profileId);
+  // Same derivation the TV's ticket used, from the phone's own address: on one
+  // network these agree, across networks they deliberately do not.
+  const roomKey = await deriveCastRoomKey(profileId, readClientAddress(request));
+  const room = getCastRoom(roomKey);
   const redis = getRedisClient();
 
   if (!room && !redis) {
@@ -37,8 +41,13 @@ export async function POST(request: NextRequest) {
   }
 
   let command;
+  let targetId: string | undefined;
   try {
-    command = normalizeCastCommand(await request.json(), Date.now());
+    const body = (await request.json()) as Record<string, unknown>;
+    command = normalizeCastCommand(body, Date.now());
+    // Absent means "every TV in this room", which is what a single-TV home
+    // should keep doing without the phone having to ask for a list first.
+    if (typeof body.targetId === 'string' && body.targetId) targetId = body.targetId;
   } catch {
     command = null;
   }
@@ -58,7 +67,7 @@ export async function POST(request: NextRequest) {
       const response = await room.fetch(
         new Request('https://cast-room/broadcast', {
           method: 'POST',
-          body: JSON.stringify(command),
+          body: JSON.stringify({ command, targetId }),
           headers: { 'content-type': 'application/json' },
         })
       );

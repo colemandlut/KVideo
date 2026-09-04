@@ -18,13 +18,52 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 
+const MAX_NAME_LENGTH = 40;
+const NAME_PREFIX = '电视';
+/** Bounds the search for a free number so a corrupt room can never spin. */
+const MAX_AUTO_NAME = 99;
+
+interface SocketInfo {
+  /** The TV's own permanent code, so it keeps one identity across reconnects. */
+  id: string;
+  name: string;
+}
+
+/**
+ * A socket whose attachment is missing or malformed still has to appear in the
+ * list - otherwise a TV would be invisible to the phone and unreachable.
+ */
+function readSocketInfo(ws: WebSocket): SocketInfo {
+  const raw = ws.deserializeAttachment() as Partial<SocketInfo> | null;
+  return {
+    id: typeof raw?.id === 'string' ? raw.id : '',
+    name: typeof raw?.name === 'string' && raw.name ? raw.name : NAME_PREFIX,
+  };
+}
+
+/**
+ * The lowest 电视N not already taken in this room.
+ *
+ * Names are compared against every TV the room has ever seen, not just the
+ * ones currently connected: two sets that are never awake together should
+ * still be 电视1 and 电视2 rather than both claiming 电视1 and becoming
+ * indistinguishable in the phone's list.
+ */
+function nextAutoName(taken: Set<string>): string {
+  for (let n = 1; n <= MAX_AUTO_NAME; n += 1) {
+    const candidate = `${NAME_PREFIX}${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return `${NAME_PREFIX}${MAX_AUTO_NAME}`;
+}
+
 interface Env {
   CAST_ROOM: DurableObjectNamespace;
   CAST_TICKET_SECRET: string;
 }
 
 interface TicketPayload {
-  profileId: string;
+  room: string;
   exp: number;
 }
 
@@ -35,11 +74,12 @@ function base64UrlToBytes(value: string): Uint8Array {
 }
 
 /**
- * Returns the profileId a ticket vouches for, or null.
+ * Returns the room a ticket vouches for, or null.
  *
  * Verification is by recomputing the signature, so a forged or edited ticket
- * simply does not match. `profileId` is read only after that check passes -
- * nothing a client sends is ever used to pick which room it lands in.
+ * simply does not match. The room is read only after that check passes -
+ * nothing a client sends is ever used to pick which room it lands in, which is
+ * what keeps one household's TVs unreachable from another's phone.
  */
 async function verifyTicket(ticket: string, secret: string): Promise<string | null> {
   const [encoded, signature] = ticket.split('.');
@@ -68,9 +108,9 @@ async function verifyTicket(ticket: string, secret: string): Promise<string | nu
 
   try {
     const payload = JSON.parse(new TextDecoder().decode(base64UrlToBytes(encoded))) as TicketPayload;
-    if (typeof payload.profileId !== 'string' || !payload.profileId) return null;
+    if (typeof payload.room !== 'string' || !payload.room) return null;
     if (typeof payload.exp !== 'number' || payload.exp < Date.now()) return null;
-    return payload.profileId;
+    return payload.room;
   } catch {
     return null;
   }
@@ -86,6 +126,32 @@ export class CastRoom extends DurableObject {
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
   }
 
+  /**
+   * The name this device should use, remembered per device code.
+   *
+   * A device that asks for a specific name (the user picked one in settings)
+   * gets it. Otherwise the first connect is assigned the lowest free 电视N and
+   * that sticks, so a set does not get renumbered every time the room's
+   * membership changes.
+   */
+  private async resolveName(deviceId: string, requested: string): Promise<string> {
+    const names = ((await this.ctx.storage.get('names')) ?? {}) as Record<string, string>;
+
+    if (requested) {
+      if (names[deviceId] !== requested) {
+        await this.ctx.storage.put('names', { ...names, [deviceId]: requested });
+      }
+      return requested;
+    }
+
+    const known = names[deviceId];
+    if (known) return known;
+
+    const assigned = nextAutoName(new Set(Object.values(names)));
+    await this.ctx.storage.put('names', { ...names, [deviceId]: assigned });
+    return assigned;
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
@@ -94,6 +160,14 @@ export class CastRoom extends DurableObject {
         return new Response('Expected websocket upgrade', { status: 426 });
       }
 
+      const deviceId = (url.searchParams.get('deviceId') || '').slice(0, 100);
+      if (!deviceId) {
+        return new Response('Missing deviceId', { status: 400 });
+      }
+
+      const requested = (url.searchParams.get('name') || '').slice(0, MAX_NAME_LENGTH);
+      const name = await this.resolveName(deviceId, requested);
+
       const [client, server] = Object.values(new WebSocketPair());
 
       // acceptWebSocket, not server.accept(): this is what lets the object be
@@ -101,12 +175,36 @@ export class CastRoom extends DurableObject {
       // costs nothing.
       this.ctx.acceptWebSocket(server);
 
+      // Attached rather than held in a field: the object is evicted from memory
+      // while sockets stay open, and an attachment is the only per-socket state
+      // that survives that. A plain Map would come back empty and every TV
+      // would lose its name the first time the room went idle.
+      server.serializeAttachment({ id: deviceId, name } satisfies SocketInfo);
+
+      // Tell the TV what it ended up being called, so it can remember the name
+      // and present the same one next time rather than being renumbered.
+      server.send(JSON.stringify({ type: 'hello', name }));
+
       return new Response(null, { status: 101, webSocket: client });
     }
 
+    if (url.pathname.endsWith('/targets')) {
+      return Response.json({
+        targets: this.ctx.getWebSockets().map((ws) => readSocketInfo(ws)),
+      });
+    }
+
     if (url.pathname.endsWith('/broadcast') && request.method === 'POST') {
-      const command = await request.json();
-      const sockets = this.ctx.getWebSockets();
+      const { command, targetId } = (await request.json()) as {
+        command: unknown;
+        targetId?: string;
+      };
+
+      // No target means every TV in the room, which is what a one-TV home wants
+      // and what the phone sends when it did not need to ask.
+      const sockets = this.ctx
+        .getWebSockets()
+        .filter((ws) => !targetId || readSocketInfo(ws).id === targetId);
       const payload = JSON.stringify({ type: 'cast', command });
 
       let delivered = 0;
@@ -169,12 +267,12 @@ export default {
       return new Response('Missing ticket', { status: 401 });
     }
 
-    const profileId = await verifyTicket(ticket, env.CAST_TICKET_SECRET);
-    if (!profileId) {
+    const room = await verifyTicket(ticket, env.CAST_TICKET_SECRET);
+    if (!room) {
       return new Response('Invalid or expired ticket', { status: 401 });
     }
 
-    const stub = env.CAST_ROOM.get(env.CAST_ROOM.idFromName(profileId));
+    const stub = env.CAST_ROOM.get(env.CAST_ROOM.idFromName(room));
     return stub.fetch(request);
   },
 };

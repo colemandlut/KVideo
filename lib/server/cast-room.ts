@@ -15,15 +15,15 @@ interface CastRoomNamespace {
 }
 
 /**
- * The relay Durable Object for one profile, or null when the binding is not
- * configured.
+ * The relay Durable Object for one room (account + network), or null when the
+ * binding is not configured.
  *
  * Null is a normal, expected state, not an error: the Pages project can be
  * deployed before the cast Worker exists, and callers fall back to the Redis
  * mailbox in that case. That is what lets the two deployments be rolled out
  * independently instead of having to land together.
  */
-export function getCastRoom(profileId: string): CastRoomStub | null {
+export function getCastRoom(roomKey: string): CastRoomStub | null {
   try {
     const env = getOptionalRequestContext()?.env as unknown as
       | Record<string, unknown>
@@ -34,7 +34,7 @@ export function getCastRoom(profileId: string): CastRoomStub | null {
       return null;
     }
 
-    return namespace.get(namespace.idFromName(profileId));
+    return namespace.get(namespace.idFromName(roomKey));
   } catch {
     // Outside Cloudflare's request runtime (local `next dev`, tests).
     return null;

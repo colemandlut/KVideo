@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useIsTvLike } from '@/lib/hooks/mobile/useDeviceDetection';
+import { readDeviceId, readTvName, writeTvName } from '@/lib/tv/tv-name';
 
 const POLL_INTERVAL_MS = 5000;
 // Reconnect backoff for the push socket, capped so a TV that lost the network
@@ -221,7 +222,15 @@ export function TvCastReceiver() {
 
       if (closed) return;
 
-      const ws = new WebSocket(`${endpoint.url}?ticket=${encodeURIComponent(endpoint.ticket)}`);
+      // Read at connect time, not at mount: renaming the TV in settings then
+      // takes effect on the next reconnect rather than needing a restart. The
+      // name may be empty on a first-ever connect - the relay assigns one and
+      // sends it back in a hello frame.
+      const ws = new WebSocket(
+        `${endpoint.url}?ticket=${encodeURIComponent(endpoint.ticket)}`
+        + `&deviceId=${encodeURIComponent(readDeviceId())}`
+        + `&name=${encodeURIComponent(readTvName())}`
+      );
       socket = ws;
 
       ws.onopen = () => {
@@ -235,8 +244,18 @@ export function TvCastReceiver() {
         try {
           const data = JSON.parse(String(event.data)) as {
             type?: string;
+            name?: string;
             command?: CastCommand;
           };
+
+          // The relay's answer to "what am I called?" on a first connect.
+          // Storing it here is what stops the TV being renumbered every time
+          // it reconnects.
+          if (data.type === 'hello') {
+            if (data.name && data.name !== readTvName()) writeTvName(data.name);
+            return;
+          }
+
           if (data.type !== 'cast' || !data.command) return;
 
           // Unlike the mailbox, a pushed command is always live, so there is

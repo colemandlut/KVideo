@@ -1,1 +1,0 @@
-var n={},d=(c,s,i)=>(n.__chunk_9635=(_,r,e)=>{"use strict";e.d(r,{z:()=>l});var o=e(2156);function l(u){try{let a=(0,o.getOptionalRequestContext)()?.env,t=a?.CAST_ROOM;return!t||typeof t.idFromName!="function"?null:t.get(t.idFromName(u))}catch{return null}}},n);export{d as __getNamedExports};
