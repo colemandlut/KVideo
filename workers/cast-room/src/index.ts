@@ -160,10 +160,14 @@ export class CastRoom extends DurableObject {
         return new Response('Expected websocket upgrade', { status: 426 });
       }
 
-      const deviceId = (url.searchParams.get('deviceId') || '').slice(0, 100);
-      if (!deviceId) {
-        return new Response('Missing deviceId', { status: 400 });
-      }
+      // A TV that has not picked up the current page yet sends no deviceId.
+      // Rejecting it stranded exactly the clients that cannot be forced to
+      // update - a WebView holding a cached page - and with the mailbox poll
+      // gone there was nothing left to fall back to, so casting simply
+      // stopped. A per-connection id is worse (the set is renumbered whenever
+      // it reconnects) but it still connects and still receives.
+      const deviceId =
+        (url.searchParams.get('deviceId') || '').slice(0, 100) || crypto.randomUUID();
 
       const requested = (url.searchParams.get('name') || '').slice(0, MAX_NAME_LENGTH);
       const name = await this.resolveName(deviceId, requested);
