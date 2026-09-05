@@ -12,13 +12,16 @@ const COLUMNS = 5;
 /** Exactly one component may own the registration for a given row id - a second
  *  owner's effect cleanup would delete the first one's entry, including the
  *  element table its ref callbacks just populated. */
-function useRowRegistration(id: string, rowIndex: number, length: number, keepColumn?: boolean) {
+function useRowRegistration(id: string, rowIndex: number, length: number, keepColumn?: boolean, keys?: string[]) {
   const { registerRow, unregisterRow } = useTvFocus();
+  // Serialised so the effect re-runs when the row's contents change identity
+  // (a re-sort) but not merely because a new array was allocated.
+  const keySignature = keys?.join('\u0000');
 
   useEffect(() => {
-    registerRow(id, rowIndex, length, keepColumn);
+    registerRow(id, rowIndex, length, keepColumn, keySignature?.split('\u0000'));
     return () => unregisterRow(id);
-  }, [id, rowIndex, length, keepColumn, registerRow, unregisterRow]);
+  }, [id, rowIndex, length, keepColumn, keySignature, registerRow, unregisterRow]);
 }
 
 function BackRow({ onBack }: { onBack: () => void }) {
@@ -51,7 +54,16 @@ interface TvResultRowProps {
 function TvResultRow({ rowIndex, videos, latencies, playability, onSelect }: TvResultRowProps) {
   const { setItemElement } = useTvFocus();
   const id = `result-${rowIndex}`;
-  useRowRegistration(id, rowIndex, videos.length, true);
+  // Identity per card, so focus can be put back on the same video after the
+  // grid re-sorts - a saved coordinate alone lands on whatever moved into that
+  // slot meanwhile.
+  useRowRegistration(
+    id,
+    rowIndex,
+    videos.length,
+    true,
+    videos.map((video) => `${video.source}:${video.vod_id}`),
+  );
 
   return (
     <div className="tv-row-strip">

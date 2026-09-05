@@ -1,20 +1,21 @@
 'use client';
 
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
-import { canRestoreFocus, clampFocus, type TvFocusPos, type TvRowMeta } from './focus-model';
+import { canRestoreFocus, clampFocus, findFocusByKey, type TvFocusPos, type TvRowMeta } from './focus-model';
 
 interface RowRegistration {
   rowIndex: number;
   length: number;
   keepColumn: boolean;
   elements: (HTMLElement | null)[];
+  keys?: string[];
 }
 
 interface TvFocusContextValue {
   rows: TvRowMeta[];
   pos: TvFocusPos;
   setPos: (next: TvFocusPos) => void;
-  registerRow: (id: string, rowIndex: number, length: number, keepColumn?: boolean) => void;
+  registerRow: (id: string, rowIndex: number, length: number, keepColumn?: boolean, keys?: string[]) => void;
   unregisterRow: (id: string) => void;
   setItemElement: (id: string, itemIndex: number, el: HTMLElement | null) => void;
   getElement: (pos: TvFocusPos) => HTMLElement | null;
@@ -36,15 +37,34 @@ function focusStorageKey(): string {
   return `kvideo-tv-focus:${window.location.pathname}${window.location.search}`;
 }
 
-function readSavedFocus(): TvFocusPos | null {
+/**
+ * The identity of the focused element, taken from a `data-tv-key` the focusable
+ * puts on itself.
+ *
+ * A coordinate alone is not enough. The results grid re-sorts as latency and
+ * playability measurements arrive, so {row 3, item 2} addresses a different
+ * video after a return than it did before - the focus was restored faithfully
+ * and still landed on the wrong card, which is indistinguishable from a broken
+ * restore. The key survives reordering; the coordinate is kept only as a
+ * fallback for lists that carry no keys.
+ */
+interface SavedFocus {
+  pos: TvFocusPos;
+  key?: string;
+}
+
+function readSavedFocus(): SavedFocus | null {
   const key = focusStorageKey();
   if (!key) return null;
   try {
     const raw = window.sessionStorage.getItem(key);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<TvFocusPos>;
+    const parsed = JSON.parse(raw) as Partial<TvFocusPos> & { key?: unknown };
     if (typeof parsed.rowIndex !== 'number' || typeof parsed.itemIndex !== 'number') return null;
-    return { rowIndex: parsed.rowIndex, itemIndex: parsed.itemIndex };
+    return {
+      pos: { rowIndex: parsed.rowIndex, itemIndex: parsed.itemIndex },
+      key: typeof parsed.key === 'string' ? parsed.key : undefined,
+    };
   } catch {
     return null;
   }
@@ -57,19 +77,24 @@ export function TvFocusProvider({ children }: { children: React.ReactNode }) {
 
   const rebuildRows = useCallback(() => {
     const ordered = [...registry.current.entries()].sort((a, b) => a[1].rowIndex - b[1].rowIndex);
-    setRows(ordered.map(([id, row]) => ({ id, length: row.length, keepColumn: row.keepColumn })));
+    setRows(ordered.map(([id, row]) => ({ id, length: row.length, keepColumn: row.keepColumn, keys: row.keys })));
   }, []);
 
-  const registerRow = useCallback((id: string, rowIndex: number, length: number, keepColumn = false) => {
+  const registerRow = useCallback((id: string, rowIndex: number, length: number, keepColumn = false, keys?: string[]) => {
     const existing = registry.current.get(id);
+    const sameKeys =
+      existing?.keys === keys
+      || (existing?.keys?.length === keys?.length
+        && (keys ?? []).every((key, index) => existing?.keys?.[index] === key));
     if (
       existing
       && existing.rowIndex === rowIndex
       && existing.length === length
       && existing.keepColumn === keepColumn
+      && sameKeys
     ) return;
     const elements = existing ? existing.elements.slice(0, length) : [];
-    registry.current.set(id, { rowIndex, length, keepColumn, elements });
+    registry.current.set(id, { rowIndex, length, keepColumn, elements, keys });
     rebuildRows();
   }, [rebuildRows]);
 
@@ -94,15 +119,21 @@ export function TvFocusProvider({ children }: { children: React.ReactNode }) {
     return row.elements[target.itemIndex] ?? null;
   }, [orderedIds]);
 
+  // Depends on `rows` so the identity written alongside the coordinate is the
+  // one currently at that position.
   const setPos = useCallback((next: TvFocusPos) => {
     setPosState(next);
     try {
-      const key = focusStorageKey();
-      if (key) window.sessionStorage.setItem(key, JSON.stringify(next));
+      const storageKey = focusStorageKey();
+      if (!storageKey) return;
+      window.sessionStorage.setItem(
+        storageKey,
+        JSON.stringify({ ...next, key: rows[next.rowIndex]?.keys?.[next.itemIndex] }),
+      );
     } catch {
       // Storage disabled - focus simply will not be restored on return.
     }
-  }, []);
+  }, [rows]);
 
   // Restoring waits until the saved coordinate actually addresses something.
   //
@@ -116,10 +147,18 @@ export function TvFocusProvider({ children }: { children: React.ReactNode }) {
   // Adjusting state during render is React's documented pattern and the one
   // already used for the clamp; the pending value lives in state rather than a
   // ref because mutating a ref during render is a hard lint error here.
-  const [pendingRestore, setPendingRestore] = useState<TvFocusPos | null>(() => readSavedFocus());
-  if (pendingRestore && canRestoreFocus(rows, pendingRestore)) {
-    setPosState(pendingRestore);
-    setPendingRestore(null);
+  const [pendingRestore, setPendingRestore] = useState<SavedFocus | null>(() => readSavedFocus());
+  if (pendingRestore) {
+    // Prefer the element's own identity: the grid re-sorts as measurements
+    // arrive, so the coordinate that was saved may now point at a different
+    // video. Fall back to the coordinate for lists whose items carry no key.
+    const byKey = pendingRestore.key ? findFocusByKey(rows, pendingRestore.key) : null;
+    const target = byKey ?? (canRestoreFocus(rows, pendingRestore.pos) ? pendingRestore.pos : null);
+
+    if (target) {
+      setPosState(target);
+      setPendingRestore(null);
+    }
   }
 
   // Clamp is computed during render (React's documented "adjust state during

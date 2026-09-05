@@ -3,6 +3,15 @@ export type TvDirection = 'up' | 'down' | 'left' | 'right';
 export interface TvRowMeta {
   /** Row identity, used by row components to find themselves in the registry. */
   id: string;
+  /**
+   * Stable identity per item, when the row has one.
+   *
+   * Lets a saved focus position survive the list being reordered: the results
+   * grid re-sorts as latency and playability measurements arrive, so a
+   * coordinate saved before leaving addresses a different video on return.
+   * Rows whose contents never move can leave this unset.
+   */
+  keys?: string[];
   /** Number of focusable items. An unloaded row registers 1 for its skeleton. */
   length: number;
   /** True for grid rows, where up/down should stay in the same column.
@@ -98,4 +107,16 @@ export function moveFocus(rows: TvRowMeta[], current: TvFocusPos, dir: TvDirecti
 export function canRestoreFocus(rows: TvRowMeta[], saved: TvFocusPos): boolean {
   const row = rows[saved.rowIndex];
   return row !== undefined && row.length > saved.itemIndex;
+}
+
+/**
+ * Where the item with this identity sits now, or null if it is no longer in
+ * the list. Used to restore focus onto the same card after a reorder.
+ */
+export function findFocusByKey(rows: TvRowMeta[], key: string): TvFocusPos | null {
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const itemIndex = rows[rowIndex].keys?.indexOf(key) ?? -1;
+    if (itemIndex >= 0) return { rowIndex, itemIndex };
+  }
+  return null;
 }
