@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTvFocus } from '@/lib/tv/TvFocusProvider';
+import { orderTvResults } from '@/lib/tv/order-results';
 import { getLatencyInfo } from '@/lib/utils/latency';
 import type { Video } from '@/lib/types';
 
@@ -105,20 +106,12 @@ interface TvSearchResultsProps {
 export function TvSearchResults({ query, loading, results, latencies, playability, onBack }: TvSearchResultsProps) {
   const router = useRouter();
 
-  // Sources known not to play sink to the end. Stable within each group, so
-  // the order the search produced (relevance, then latency) is preserved among
-  // the ones that work - this only moves the dead ones out of the way.
-  //
-  // Sources still being checked stay where they are rather than being treated
-  // as playable: an unchecked source is not a verdict, and demoting it on
-  // suspicion would shuffle the grid twice.
-  const ordered = useMemo(() => {
-    const dead = (video: Video) => (playability[video.source] === 'dead' ? 1 : 0);
-    return results
-      .map((video, index) => ({ video, index }))
-      .sort((a, b) => dead(a.video) - dead(b.video) || a.index - b.index)
-      .map((entry) => entry.video);
-  }, [results, playability]);
+  // See lib/tv/order-results.ts for why the order matters more here than on a
+  // phone, and what the tiers mean.
+  const ordered = useMemo(
+    () => orderTvResults(results, latencies, playability),
+    [results, latencies, playability],
+  );
 
   const chunks = useMemo(() => {
     const out: Video[][] = [];

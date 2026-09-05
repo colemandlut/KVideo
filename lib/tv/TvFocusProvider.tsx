@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
-import { clampFocus, type TvFocusPos, type TvRowMeta } from './focus-model';
+import { canRestoreFocus, clampFocus, type TvFocusPos, type TvRowMeta } from './focus-model';
 
 interface RowRegistration {
   rowIndex: number;
@@ -104,19 +104,22 @@ export function TvFocusProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Restoring has to wait for the rows to register. On the first render after
-  // coming back from the player there are none yet, and the clamp below would
-  // commit {0,0} - which is precisely why returning from a video dropped focus
-  // to the top-left corner while the scroll position was restored correctly.
+  // Restoring waits until the saved coordinate actually addresses something.
+  //
+  // Waiting for "any row" is not enough, and that was the bug: coming back
+  // from the player, the 返回 row registers first, so for a render or two the
+  // grid is one row long. Restoring {row 3, item 2} then hands the clamp a
+  // position it squashes to {0,0} - and the clamp commits, so the restore is
+  // destroyed the instant it happens. The result looked exactly like no
+  // restore at all.
   //
   // Adjusting state during render is React's documented pattern and the one
-  // already used for the clamp; the flag lives in state rather than a ref
-  // because mutating a ref during render is a hard lint error here.
-  const [restored, setRestored] = useState(false);
-  if (!restored && rows.length > 0) {
-    setRestored(true);
-    const saved = readSavedFocus();
-    if (saved) setPosState(saved);
+  // already used for the clamp; the pending value lives in state rather than a
+  // ref because mutating a ref during render is a hard lint error here.
+  const [pendingRestore, setPendingRestore] = useState<TvFocusPos | null>(() => readSavedFocus());
+  if (pendingRestore && canRestoreFocus(rows, pendingRestore)) {
+    setPosState(pendingRestore);
+    setPendingRestore(null);
   }
 
   // Clamp is computed during render (React's documented "adjust state during

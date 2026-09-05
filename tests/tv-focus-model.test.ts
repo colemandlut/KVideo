@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { moveFocus, clampFocus, findFirstFocusable, isAtRowEnd } from '@/lib/tv/focus-model';
+import { moveFocus, clampFocus, findFirstFocusable, isAtRowEnd, canRestoreFocus } from '@/lib/tv/focus-model';
 import type { TvRowMeta } from '@/lib/tv/focus-model';
 
 const rows: TvRowMeta[] = [
@@ -71,4 +71,49 @@ test('isAtRowEnd reports the last item of a row', () => {
   assert.equal(isAtRowEnd(rows, { rowIndex: 3, itemIndex: 1 }), true);
   assert.equal(isAtRowEnd(rows, { rowIndex: 3, itemIndex: 0 }), false);
   assert.equal(isAtRowEnd(rows, { rowIndex: 2, itemIndex: 0 }), false);
+});
+
+// Restoring focus after returning from the player. The failure this guards
+// against is subtle and was shipped once: restoring too early hands the clamp
+// a position it squashes to {0,0}, and because the clamp commits, the restore
+// is destroyed the instant it happens - indistinguishable from no restore.
+test('a saved position waits for its row to exist', () => {
+  const saved = { rowIndex: 3, itemIndex: 2 };
+
+  // Coming back from the player, only the 返回 row has registered so far.
+  assert.equal(canRestoreFocus([{ id: 'back', length: 1 }], saved), false);
+
+  // Rows exist but the target one is still short of that column.
+  assert.equal(
+    canRestoreFocus(
+      [
+        { id: 'back', length: 1 },
+        { id: 'r1', length: 5 },
+        { id: 'r2', length: 5 },
+        { id: 'r3', length: 2 },
+      ],
+      saved,
+    ),
+    false,
+    'itemIndex 2 needs a row of at least 3',
+  );
+
+  // Now it addresses something.
+  assert.equal(
+    canRestoreFocus(
+      [
+        { id: 'back', length: 1 },
+        { id: 'r1', length: 5 },
+        { id: 'r2', length: 5 },
+        { id: 'r3', length: 5 },
+      ],
+      saved,
+    ),
+    true,
+  );
+});
+
+test('the top-left position is restorable as soon as anything registers', () => {
+  assert.equal(canRestoreFocus([{ id: 'back', length: 1 }], { rowIndex: 0, itemIndex: 0 }), true);
+  assert.equal(canRestoreFocus([], { rowIndex: 0, itemIndex: 0 }), false);
 });
