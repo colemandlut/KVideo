@@ -5,11 +5,26 @@ import { useRouter } from 'next/navigation';
 import { useIsTvLike } from '@/lib/hooks/mobile/useDeviceDetection';
 import { readDeviceId, readTvName, writeTvName } from '@/lib/tv/tv-name';
 
-const POLL_INTERVAL_MS = 5000;
+// Only used while the push socket is down. Five seconds all day was what blew
+// past Upstash's free tier; thirty seconds costs at most ~2.9k commands a day
+// and only when something is already wrong, which is cheap insurance against
+// casting silently doing nothing.
+const POLL_INTERVAL_MS = 30000;
 // Reconnect backoff for the push socket, capped so a TV that lost the network
 // for an hour still comes back on its own without hammering the edge.
 const SOCKET_BACKOFF_START_MS = 1000;
 const SOCKET_BACKOFF_MAX_MS = 30000;
+// How often the TV pokes the relay to prove the connection is still real.
+// Nothing else travels on this socket for hours at a time, and an idle TCP
+// connection through a home router's NAT table gets reclaimed silently - both
+// ends still believe they are connected while nothing can cross. The relay
+// answers these in the runtime (setWebSocketAutoResponse), so a heartbeat
+// costs no Durable Object wake-up and no billable duration.
+const HEARTBEAT_INTERVAL_MS = 45000;
+// A pong that does not come back in this long means the socket is dead even
+// though it still reports OPEN. Closing it is the only way to find out.
+const HEARTBEAT_TIMEOUT_MS = 20000;
+
 // How long to wait before asking for a ticket again when nobody has logged in
 // yet. This receiver is mounted outside the password gate, so on a cold start
 // it runs before there is a session.
@@ -185,6 +200,13 @@ export function TvCastReceiver() {
     // --- push path -------------------------------------------------------
 
     let socket: WebSocket | null = null;
+    let heartbeatId: ReturnType<typeof setInterval> | null = null;
+    let pongTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const stopHeartbeat = () => {
+      if (heartbeatId !== null) { clearInterval(heartbeatId); heartbeatId = null; }
+      if (pongTimeoutId !== null) { clearTimeout(pongTimeoutId); pongTimeoutId = null; }
+    };
     let backoff = SOCKET_BACKOFF_START_MS;
     let reconnectId: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
@@ -207,9 +229,8 @@ export function TvCastReceiver() {
           return;
         }
         if (res.status === 401) {
-          // Session gone (logged out, or expired mid-session). Ask again later
-          // rather than polling the mailbox - the ticket endpoint costs no
-          // Redis, so waiting is free and recovery is automatic.
+          // Session gone (logged out, or expired mid-session). The poll backs
+          // itself off while unauthenticated, so it costs almost nothing here.
           reconnectId = setTimeout(() => void openSocket(), TICKET_RETRY_WHILE_UNAUTHENTICATED_MS);
           return;
         }
@@ -238,9 +259,31 @@ export function TvCastReceiver() {
         // Resetting it in onclose would turn a server that accepts and then
         // immediately drops us into a tight reconnect loop.
         backoff = SOCKET_BACKOFF_START_MS;
+        // The socket is the fast path; the mailbox was only covering for it.
+        stopPolling();
+
+        heartbeatId = setInterval(() => {
+          if (ws.readyState !== WebSocket.OPEN) return;
+          ws.send('ping');
+          if (pongTimeoutId === null) {
+            pongTimeoutId = setTimeout(() => {
+              pongTimeoutId = null;
+              // Closing triggers onclose, which reconnects and restarts the
+              // mailbox poll - the same path any other drop takes.
+              try { ws.close(); } catch { /* already gone */ }
+            }, HEARTBEAT_TIMEOUT_MS);
+          }
+        }, HEARTBEAT_INTERVAL_MS);
       };
 
       ws.onmessage = (event) => {
+        // Heartbeat replies are answered by the runtime, never reach the
+        // Durable Object, and arrive as a bare string rather than JSON.
+        if (String(event.data) === 'pong') {
+          if (pongTimeoutId !== null) { clearTimeout(pongTimeoutId); pongTimeoutId = null; }
+          return;
+        }
+
         try {
           const data = JSON.parse(String(event.data)) as {
             type?: string;
@@ -273,6 +316,7 @@ export function TvCastReceiver() {
 
       ws.onclose = () => {
         socket = null;
+        stopHeartbeat();
         if (closed) return;
         scheduleReconnect();
       };
@@ -289,7 +333,20 @@ export function TvCastReceiver() {
     // failing costs one attempt per backoff interval and no Redis at all, so
     // retrying is both cheaper and self-healing - the moment the network comes
     // back, casting works again without a reload.
+    const stopPolling = () => {
+      if (intervalId !== null) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    };
+
     const scheduleReconnect = () => {
+      // Poll alongside the retries rather than instead of them. Retrying alone
+      // is cheaper, but it leaves casting doing nothing at all for as long as
+      // the socket refuses to come up - and the phone still reports success,
+      // so the failure is invisible. The mailbox keeps casting working, slowly,
+      // until the socket recovers.
+      startPolling();
       reconnectId = setTimeout(() => void openSocket(), backoff);
       backoff = Math.min(backoff * 2, SOCKET_BACKOFF_MAX_MS);
     };
@@ -349,6 +406,7 @@ export function TvCastReceiver() {
 
     return () => {
       closed = true;
+      stopHeartbeat();
       document.removeEventListener('visibilitychange', onVisible);
       if (reconnectId !== null) clearTimeout(reconnectId);
       if (socket !== null) socket.close();

@@ -9,7 +9,7 @@ import { Icons } from '@/components/ui/Icon';
 import { siteConfig } from '@/lib/config/site-config';
 import { useIsTvLike } from '@/lib/hooks/mobile/useDeviceDetection';
 
-type CastState = 'idle' | 'sending' | 'sent' | 'error';
+type CastState = 'idle' | 'sending' | 'sent' | 'queued' | 'error';
 
 const CAST_FEEDBACK_MS = 2000;
 
@@ -87,7 +87,12 @@ export function PlayerNavbar({ isPremium }: { isPremium?: boolean }) {
                 body: JSON.stringify({ id, source, title, episode, t, targetId }),
             });
 
-            setCastState(res.ok ? 'sent' : 'error');
+            // delivered 0 means the command only reached the mailbox: no TV
+            // is holding a socket right now. Saying 已投屏 there is how a dead
+            // push path stayed invisible for a whole day - the phone claimed
+            // success while nothing happened on the TV.
+            const body = res.ok ? ((await res.json()) as { delivered?: number }) : null;
+            setCastState(!res.ok ? 'error' : (body?.delivered ?? 0) > 0 ? 'sent' : 'queued');
         } catch {
             setCastState('error');
         }
@@ -123,7 +128,13 @@ export function PlayerNavbar({ isPremium }: { isPremium?: boolean }) {
 
     const showCastButton = !isTvLike && castAvailable;
     const castLabel =
-        castState === 'sent' ? '已投屏' : castState === 'error' ? '投屏失败' : '投屏';
+        castState === 'sent'
+            ? '已投屏'
+            : castState === 'queued'
+              ? '电视未连接'
+              : castState === 'error'
+                ? '投屏失败'
+                : '投屏';
 
     return (
         <nav className="sticky top-0 z-50 pt-4 pb-2 px-4" style={{ transform: 'translateZ(0)' }}>
