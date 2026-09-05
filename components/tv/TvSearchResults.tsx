@@ -105,13 +105,28 @@ interface TvSearchResultsProps {
 export function TvSearchResults({ query, loading, results, latencies, playability, onBack }: TvSearchResultsProps) {
   const router = useRouter();
 
+  // Sources known not to play sink to the end. Stable within each group, so
+  // the order the search produced (relevance, then latency) is preserved among
+  // the ones that work - this only moves the dead ones out of the way.
+  //
+  // Sources still being checked stay where they are rather than being treated
+  // as playable: an unchecked source is not a verdict, and demoting it on
+  // suspicion would shuffle the grid twice.
+  const ordered = useMemo(() => {
+    const dead = (video: Video) => (playability[video.source] === 'dead' ? 1 : 0);
+    return results
+      .map((video, index) => ({ video, index }))
+      .sort((a, b) => dead(a.video) - dead(b.video) || a.index - b.index)
+      .map((entry) => entry.video);
+  }, [results, playability]);
+
   const chunks = useMemo(() => {
     const out: Video[][] = [];
-    for (let i = 0; i < results.length; i += COLUMNS) {
-      out.push(results.slice(i, i + COLUMNS));
+    for (let i = 0; i < ordered.length; i += COLUMNS) {
+      out.push(ordered.slice(i, i + COLUMNS));
     }
     return out;
-  }, [results]);
+  }, [ordered]);
 
   const handleSelect = useCallback((video: Video) => {
     const params = new URLSearchParams({

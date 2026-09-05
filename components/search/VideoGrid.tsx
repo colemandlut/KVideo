@@ -100,8 +100,14 @@ export const VideoGrid = memo(function VideoGrid({
     });
 
     return Array.from(groups.entries()).map(([, groupVideos]) => {
-      // Sort by latency (lowest first) 
+      // Known-dead sources sink below the rest, then latency decides. This is
+      // not only about display order: the first entry becomes the group's
+      // representative - the source that actually gets played - and a source
+      // whose CDN 404s should never be the one a tap lands on.
+      const isDead = (video: Video) => (playability[video.source] === 'dead' ? 1 : 0);
       const sorted = [...groupVideos].sort((a, b) => {
+        const byPlayability = isDead(a) - isDead(b);
+        if (byPlayability !== 0) return byPlayability;
         if (a.latency === undefined) return 1;
         if (b.latency === undefined) return -1;
         return a.latency - b.latency;
@@ -113,7 +119,7 @@ export const VideoGrid = memo(function VideoGrid({
         name: sorted[0].vod_name,
       };
     });
-  }, [videos, displayMode]);
+  }, [videos, displayMode, playability]);
 
   // Callback ref for the load more trigger
   const loadMoreRef = useCallback((node: HTMLDivElement | null) => {
