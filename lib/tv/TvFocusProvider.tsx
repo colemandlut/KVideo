@@ -22,6 +22,34 @@ interface TvFocusContextValue {
 
 const TvFocusContext = createContext<TvFocusContextValue | null>(null);
 
+/**
+ * Where focus was when this screen was last left.
+ *
+ * Kept per URL so the results grid, the home screen and the favourites list
+ * each remember their own spot. Session storage rather than a module variable
+ * because the WebView reloads the page on some navigations, and a variable
+ * would not survive that - the same reason the scroll position is stored
+ * rather than held in memory.
+ */
+function focusStorageKey(): string {
+  if (typeof window === 'undefined') return '';
+  return `kvideo-tv-focus:${window.location.pathname}${window.location.search}`;
+}
+
+function readSavedFocus(): TvFocusPos | null {
+  const key = focusStorageKey();
+  if (!key) return null;
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<TvFocusPos>;
+    if (typeof parsed.rowIndex !== 'number' || typeof parsed.itemIndex !== 'number') return null;
+    return { rowIndex: parsed.rowIndex, itemIndex: parsed.itemIndex };
+  } catch {
+    return null;
+  }
+}
+
 export function TvFocusProvider({ children }: { children: React.ReactNode }) {
   const registry = useRef(new Map<string, RowRegistration>());
   const [rows, setRows] = useState<TvRowMeta[]>([]);
@@ -68,7 +96,28 @@ export function TvFocusProvider({ children }: { children: React.ReactNode }) {
 
   const setPos = useCallback((next: TvFocusPos) => {
     setPosState(next);
+    try {
+      const key = focusStorageKey();
+      if (key) window.sessionStorage.setItem(key, JSON.stringify(next));
+    } catch {
+      // Storage disabled - focus simply will not be restored on return.
+    }
   }, []);
+
+  // Restoring has to wait for the rows to register. On the first render after
+  // coming back from the player there are none yet, and the clamp below would
+  // commit {0,0} - which is precisely why returning from a video dropped focus
+  // to the top-left corner while the scroll position was restored correctly.
+  //
+  // Adjusting state during render is React's documented pattern and the one
+  // already used for the clamp; the flag lives in state rather than a ref
+  // because mutating a ref during render is a hard lint error here.
+  const [restored, setRestored] = useState(false);
+  if (!restored && rows.length > 0) {
+    setRestored(true);
+    const saved = readSavedFocus();
+    if (saved) setPosState(saved);
+  }
 
   // Clamp is computed during render (React's documented "adjust state during
   // render" pattern) and, when it differs from the stored position, written
