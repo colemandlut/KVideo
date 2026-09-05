@@ -14,6 +14,17 @@ const POLL_INTERVAL_MS = 30000;
 // for an hour still comes back on its own without hammering the edge.
 const SOCKET_BACKOFF_START_MS = 1000;
 const SOCKET_BACKOFF_MAX_MS = 30000;
+// How often the TV pokes the relay to prove the connection is still real.
+// Nothing else travels on this socket for hours at a time, and an idle TCP
+// connection through a home router's NAT table gets reclaimed silently - both
+// ends still believe they are connected while nothing can cross. The relay
+// answers these in the runtime (setWebSocketAutoResponse), so a heartbeat
+// costs no Durable Object wake-up and no billable duration.
+const HEARTBEAT_INTERVAL_MS = 45000;
+// A pong that does not come back in this long means the socket is dead even
+// though it still reports OPEN. Closing it is the only way to find out.
+const HEARTBEAT_TIMEOUT_MS = 20000;
+
 // How long to wait before asking for a ticket again when nobody has logged in
 // yet. This receiver is mounted outside the password gate, so on a cold start
 // it runs before there is a session.
@@ -189,6 +200,13 @@ export function TvCastReceiver() {
     // --- push path -------------------------------------------------------
 
     let socket: WebSocket | null = null;
+    let heartbeatId: ReturnType<typeof setInterval> | null = null;
+    let pongTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const stopHeartbeat = () => {
+      if (heartbeatId !== null) { clearInterval(heartbeatId); heartbeatId = null; }
+      if (pongTimeoutId !== null) { clearTimeout(pongTimeoutId); pongTimeoutId = null; }
+    };
     let backoff = SOCKET_BACKOFF_START_MS;
     let reconnectId: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
@@ -243,9 +261,29 @@ export function TvCastReceiver() {
         backoff = SOCKET_BACKOFF_START_MS;
         // The socket is the fast path; the mailbox was only covering for it.
         stopPolling();
+
+        heartbeatId = setInterval(() => {
+          if (ws.readyState !== WebSocket.OPEN) return;
+          ws.send('ping');
+          if (pongTimeoutId === null) {
+            pongTimeoutId = setTimeout(() => {
+              pongTimeoutId = null;
+              // Closing triggers onclose, which reconnects and restarts the
+              // mailbox poll - the same path any other drop takes.
+              try { ws.close(); } catch { /* already gone */ }
+            }, HEARTBEAT_TIMEOUT_MS);
+          }
+        }, HEARTBEAT_INTERVAL_MS);
       };
 
       ws.onmessage = (event) => {
+        // Heartbeat replies are answered by the runtime, never reach the
+        // Durable Object, and arrive as a bare string rather than JSON.
+        if (String(event.data) === 'pong') {
+          if (pongTimeoutId !== null) { clearTimeout(pongTimeoutId); pongTimeoutId = null; }
+          return;
+        }
+
         try {
           const data = JSON.parse(String(event.data)) as {
             type?: string;
@@ -278,6 +316,7 @@ export function TvCastReceiver() {
 
       ws.onclose = () => {
         socket = null;
+        stopHeartbeat();
         if (closed) return;
         scheduleReconnect();
       };
@@ -367,6 +406,7 @@ export function TvCastReceiver() {
 
     return () => {
       closed = true;
+      stopHeartbeat();
       document.removeEventListener('visibilitychange', onVisible);
       if (reconnectId !== null) clearTimeout(reconnectId);
       if (socket !== null) socket.close();
