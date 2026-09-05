@@ -84,3 +84,18 @@ export function moveFocus(rows: TvRowMeta[], current: TvFocusPos, dir: TvDirecti
 
   return current;
 }
+
+/**
+ * Whether a saved focus position can be restored yet.
+ *
+ * Restoring must wait for the coordinate to actually address something.
+ * "Any row has registered" is not enough: coming back from the player the
+ * 返回 row registers first, so for a render or two the grid is one row long.
+ * Restoring {row 3, item 2} into that hands the clamp a position it squashes
+ * to {0,0} - and the clamp commits, destroying the restore the instant it
+ * happens. The screen then looks exactly as if nothing had been saved.
+ */
+export function canRestoreFocus(rows: TvRowMeta[], saved: TvFocusPos): boolean {
+  const row = rows[saved.rowIndex];
+  return row !== undefined && row.length > saved.itemIndex;
+}
