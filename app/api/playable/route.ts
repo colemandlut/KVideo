@@ -3,6 +3,7 @@ import { authenticationRequiredResponse } from '@/lib/server/api-responses';
 import { getServerSession } from '@/lib/server/auth';
 import { getVideoDetail } from '@/lib/api/client';
 import { getSourceById } from '@/lib/api/video-sources';
+import type { VideoSource } from '@/lib/types';
 import { probeSourceLatency } from '@/lib/api/source-latency';
 import { isProbeableUrl } from '@/lib/server/probe-guard';
 
@@ -40,13 +41,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid body' }, { status: 400 });
   }
 
-  if (typeof id !== 'string' || !id || typeof source !== 'string' || !source) {
-    return NextResponse.json({ error: 'id and source are required' }, { status: 400 });
+  if (typeof id !== 'string' || !id) {
+    return NextResponse.json({ error: 'id is required' }, { status: 400 });
   }
 
-  const sourceConfig = getSourceById(source);
-  if (!sourceConfig) {
-    return NextResponse.json({ error: 'Unknown source' }, { status: 400 });
+  // The source may be an id this deployment knows, or the config object the
+  // client holds. Most sources come from the user's subscription and exist
+  // only on the client, so looking them up by id here failed for every one -
+  // which is how a whole screen came to be labelled unplayable. This mirrors
+  // what /api/detail already accepts.
+  const sourceConfig =
+    typeof source === 'string' ? getSourceById(source) : (source as VideoSource | undefined);
+
+  if (!sourceConfig || typeof sourceConfig !== 'object' || !sourceConfig.baseUrl) {
+    // Not an answer about playability - say so rather than condemning it.
+    return NextResponse.json(
+      { checked: false, reason: 'unknown-source' },
+      { headers: { 'Cache-Control': 'no-store' } }
+    );
   }
 
   try {
@@ -57,16 +69,27 @@ export async function POST(request: NextRequest) {
     // such rather than as a probe failure.
     if (typeof streamUrl !== 'string' || !isProbeableUrl(streamUrl)) {
       return NextResponse.json(
-        { playable: false, reason: 'no-stream' },
+        { checked: false, reason: 'no-stream' },
         { headers: { 'Cache-Control': 'no-store' } }
       );
     }
 
     const result = await probeSourceLatency(streamUrl);
 
+    // A probe that never got an answer says nothing about the source - the CDN
+    // may simply refuse requests from a datacenter. Only a real HTTP status is
+    // evidence either way.
+    if (!result.success || result.status === 0) {
+      return NextResponse.json(
+        { checked: false, reason: 'probe-failed' },
+        { headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
     return NextResponse.json(
       {
-        playable: result.success && isPlayableStatus(result.status),
+        checked: true,
+        playable: isPlayableStatus(result.status),
         status: result.status,
         latency: result.latency,
       },
@@ -74,6 +97,9 @@ export async function POST(request: NextRequest) {
     );
   } catch (error) {
     console.error('Playability check failed:', error);
-    return NextResponse.json({ error: 'Probe failed' }, { status: 502 });
+    return NextResponse.json(
+      { checked: false, reason: 'error' },
+      { headers: { 'Cache-Control': 'no-store' } }
+    );
   }
 }
