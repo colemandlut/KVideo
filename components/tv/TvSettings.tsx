@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TvFocusProvider, useTvFocus } from '@/lib/tv/TvFocusProvider';
 import { useTvKeys } from '@/lib/tv/useTvKeys';
@@ -237,6 +237,17 @@ function ConfirmActionRow({ id, rowIndex, label, description, actionLabel, confi
 function TvSettingsContent() {
   const tvName = useTvName();
 
+  // An auto-assigned 电视N is not one of the presets, so without this the row
+  // would render with nothing highlighted and the TV would have no way to tell
+  // you what it is currently called - which is exactly what happened.
+  const nameOptions = useMemo(() => {
+    const presets = TV_NAME_OPTIONS.map((name) => ({ value: name, label: name }));
+    if (!tvName || TV_NAME_OPTIONS.includes(tvName as (typeof TV_NAME_OPTIONS)[number])) {
+      return presets;
+    }
+    return [{ value: tvName, label: tvName }, ...presets];
+  }, [tvName]);
+
   const router = useRouter();
   useTvKeys(true);
 
@@ -323,10 +334,14 @@ function TvSettingsContent() {
         id="tv-name"
         rowIndex={ROW.tvName}
         label="电视名称"
-        description="手机投屏时用这个名字认出这台电视。首次连接会自动分配「电视1」「电视2」，可在此改成固定名字"
+        description={
+          tvName
+            ? `当前名称「${tvName}」，手机投屏时用它认出这台电视`
+            : '尚未连接，首次连接时会自动分配「电视1」「电视2」'
+        }
         value={tvName}
         onChange={writeTvName}
-        options={TV_NAME_OPTIONS.map((name) => ({ value: name, label: name }))}
+        options={nameOptions}
       />
       <OptionRow
         id="tv-theme"
