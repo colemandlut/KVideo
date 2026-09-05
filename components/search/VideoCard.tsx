@@ -22,6 +22,7 @@ interface VideoCardProps {
     onCardClick: (e: React.MouseEvent, cardId: string, videoUrl: string) => void;
     isPremium?: boolean;
     latencies?: Record<string, number>;
+    playability?: Record<string, 'playable' | 'dead'>;
     resolution?: ResolutionInfo | null;
     isProbing?: boolean;
 }
@@ -34,6 +35,7 @@ export const VideoCard = memo<VideoCardProps>(({
     onCardClick,
     isPremium = false,
     latencies = {},
+    playability = {},
     resolution,
     isProbing = false,
 }) => {
@@ -191,6 +193,14 @@ export const VideoCard = memo<VideoCardProps>(({
                                                 ...
                                             </span>
                                         ) : null}
+                                        {/* A source whose API is fast but whose CDN 404s is
+                                            worse than a slow one that plays, and the latency
+                                            number on its own actively hides that. */}
+                                        {playability[video.source] === 'dead' && (
+                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold text-white bg-red-600/80 flex-shrink-0">
+                                                不可播
+                                            </span>
+                                        )}
                                         {displayLatency !== undefined && (
                                             <LatencyBadge latency={displayLatency} className="flex-shrink-0" />
                                         )}

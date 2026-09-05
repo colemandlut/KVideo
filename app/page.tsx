@@ -10,6 +10,7 @@ import { SearchResults } from '@/components/home/SearchResults';
 import { useHomePage } from '@/lib/hooks/useHomePage';
 import { useLatencyPing } from '@/lib/hooks/useLatencyPing';
 import { useIsTvLike } from '@/lib/hooks/mobile/useDeviceDetection';
+import { usePlayability } from '@/lib/hooks/usePlayability';
 import { TvHome } from '@/components/tv/TvHome';
 
 function HomePage() {
@@ -41,6 +42,11 @@ function HomePage() {
     enabled: hasSearched && results.length > 0,
   });
 
+  // Whether each source can actually play what it returned. Separate from
+  // latency on purpose: latency times the source's API host, which is a
+  // different server from the one serving the video.
+  const playability = usePlayability(results, hasSearched && results.length > 0);
+
   if (isTvLike) {
     return (
       <TvHome
@@ -49,6 +55,7 @@ function HomePage() {
         loading={loading}
         results={results}
         latencies={latencies}
+        playability={playability}
         onSearch={handleSearch}
         onReset={handleReset}
       />
@@ -86,6 +93,7 @@ function HomePage() {
             availableSources={availableSources}
             loading={loading}
             latencies={latencies}
+            playability={playability}
           />
         )}
 

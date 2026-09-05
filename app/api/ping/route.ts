@@ -4,27 +4,27 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { authenticationRequiredResponse } from '@/lib/server/api-responses';
+import { getServerSession } from '@/lib/server/auth';
 import { probeSourceLatency } from '@/lib/api/source-latency';
+import { isProbeableUrl } from '@/lib/server/probe-guard';
 
 export const runtime = 'edge';
 
 export async function POST(request: NextRequest) {
+    // This route fetches a client-supplied URL from the edge. Unauthenticated
+    // and unfiltered, it was usable by anyone as a scanner pointed at any host.
+    const session = await getServerSession(request);
+    if (!session?.profileId) {
+        return authenticationRequiredResponse();
+    }
+
     try {
         const body = await request.json();
         const { url } = body;
 
-        if (!url || typeof url !== 'string') {
+        if (!url || typeof url !== 'string' || !isProbeableUrl(url)) {
             return NextResponse.json({ error: 'Invalid URL' }, { status: 400 });
-        }
-
-        // Validate URL format
-        try {
-            const parsedUrl = new URL(url);
-            if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-                return NextResponse.json({ error: 'Unsupported URL protocol' }, { status: 400 });
-            }
-        } catch {
-            return NextResponse.json({ error: 'Invalid URL format' }, { status: 400 });
         }
 
         const result = await probeSourceLatency(url);

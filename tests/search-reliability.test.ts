@@ -61,6 +61,9 @@ test('GET fallback latency excludes the failed HEAD attempt duration', async () 
   assert.deepEqual(result, {
     latency: 250,
     success: true,
+    // Carried so callers can tell "the server answered" from "the video is
+    // there" - a dead CDN answers a 404 fast and used to read as healthy.
+    status: 200,
     timeout: false,
     method: 'GET',
   });

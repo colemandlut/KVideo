@@ -1,6 +1,15 @@
 export interface SourceLatencyResult {
   latency: number;
+  /** A response came back at all. True even for a 404 - see `status`. */
   success: boolean;
+  /**
+   * The HTTP status, or 0 if nothing answered.
+   *
+   * Needed because "the server replied" and "the video exists" are different
+   * questions: a dead CDN answers a 404 in 200ms, which reads as a fast,
+   * healthy source if you only look at latency.
+   */
+  status: number;
   timeout: boolean;
   method: 'HEAD' | 'GET';
 }
@@ -29,7 +38,7 @@ async function probeAttempt(
   const startedAt = now();
 
   try {
-    await fetcher(url, {
+    const response = await fetcher(url, {
       method,
       signal: controller.signal,
       redirect: 'follow',
@@ -39,6 +48,7 @@ async function probeAttempt(
     return {
       latency: Math.max(0, Math.round(now() - startedAt)),
       success: true,
+      status: response.status,
       timeout: false,
       method,
     };
@@ -46,6 +56,7 @@ async function probeAttempt(
     return {
       latency: Math.max(0, Math.round(now() - startedAt)),
       success: false,
+      status: 0,
       timeout: timedOut || (error instanceof Error && error.name === 'AbortError'),
       method,
     };

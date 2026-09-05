@@ -117,11 +117,12 @@ export interface TvHomeProps {
   loading: boolean;
   results: Video[];
   latencies: Record<string, number>;
+  playability?: Record<string, 'playable' | 'dead'>;
   onSearch: (query: string) => void;
   onReset: () => void;
 }
 
-function TvHomeContent({ query, hasSearched, loading, results, latencies, onSearch, onReset }: TvHomeProps) {
+function TvHomeContent({ query, hasSearched, loading, results, latencies, playability = {}, onSearch, onReset }: TvHomeProps) {
   const router = useRouter();
   const { pos } = useTvFocus();
   useTvKeys(true);
@@ -248,7 +249,7 @@ function TvHomeContent({ query, hasSearched, loading, results, latencies, onSear
   if (hasSearched) {
     return (
       <div className="tv-root min-h-screen bg-[#0f1218] text-[#e8eaed]">
-        <TvSearchResults query={query} loading={loading} results={results} latencies={latencies} onBack={onReset} />
+        <TvSearchResults query={query} loading={loading} results={results} latencies={latencies} playability={playability} onBack={onReset} />
       </div>
     );
   }

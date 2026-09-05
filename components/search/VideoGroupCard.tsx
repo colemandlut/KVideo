@@ -35,6 +35,7 @@ interface VideoGroupCardProps {
     onCardClick: (e: React.MouseEvent, cardId: string, videoUrl: string) => void;
     isPremium?: boolean;
     latencies?: Record<string, number>;
+    playability?: Record<string, 'playable' | 'dead'>;
     resolution?: ResolutionInfo | null;
     isProbing?: boolean;
 }
@@ -45,6 +46,7 @@ export const VideoGroupCard = memo<VideoGroupCardProps>(({
     isActive,
     onCardClick,
     isPremium = false,
+    playability = {},
     latencies = {},
     resolution,
     isProbing = false,
@@ -61,6 +63,14 @@ export const VideoGroupCard = memo<VideoGroupCardProps>(({
         const currentLatencies = videos.map(v => latencies[v.source] ?? v.latency).filter(l => l !== undefined) as number[];
         return currentLatencies.length > 0 ? Math.min(...currentLatencies) : undefined;
     }, [videos, latencies]);
+
+    // How many of this group's sources actually play. Surfaced only once some
+    // are known dead: "3 源" is misleading when two of the three 404, and that
+    // is exactly the case a latency badge cannot express.
+    const deadCount = useMemo(
+        () => videos.filter(v => playability[v.source] === 'dead').length,
+        [videos, playability],
+    );
 
     // Generate URL with grouped sources stored in sessionStorage (avoids long URLs / 414 errors)
     const videoUrl = useMemo(() => {
@@ -157,6 +167,17 @@ export const VideoGroupCard = memo<VideoGroupCardProps>(({
                                 <Icons.Layers size={12} className="mr-1" />
                                 {videos.length} 源
                             </Badge>
+
+                            {deadCount > 0 && (
+                                <Badge
+                                    variant="primary"
+                                    className={`flex-shrink-0 ${deadCount === videos.length ? 'bg-red-600' : 'bg-amber-600'}`}
+                                >
+                                    {deadCount === videos.length
+                                        ? '均不可播'
+                                        : `${videos.length - deadCount}/${videos.length} 可播`}
+                                </Badge>
+                            )}
 
                             {bestLatency !== undefined && (
                                 <LatencyBadge latency={bestLatency} className="flex-shrink-0" />
