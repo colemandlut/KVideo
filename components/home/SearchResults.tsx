@@ -15,6 +15,7 @@ interface SearchResultsProps {
     loading: boolean;
     isPremium?: boolean;
     latencies?: Record<string, number>;
+    playability?: Record<string, 'playable' | 'dead'>;
 }
 
 export function SearchResults({
@@ -23,6 +24,7 @@ export function SearchResults({
     loading,
     isPremium = false,
     latencies = {},
+    playability = {},
 }: SearchResultsProps) {
     // Source badges hook - filters by video source
     const {
@@ -94,6 +96,7 @@ export function SearchResults({
                 videos={finalFilteredVideos}
                 isPremium={isPremium}
                 latencies={latencies}
+                playability={playability}
             />
         </div>
     );

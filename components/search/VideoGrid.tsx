@@ -13,13 +13,15 @@ interface VideoGridProps {
   className?: string;
   isPremium?: boolean;
   latencies?: Record<string, number>;
+  playability?: Record<string, 'playable' | 'dead'>;
 }
 
 export const VideoGrid = memo(function VideoGrid({
   videos,
   className = '',
   isPremium = false,
-  latencies = {}
+  latencies = {},
+  playability = {}
 }: VideoGridProps) {
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(24);
@@ -208,6 +210,7 @@ export const VideoGrid = memo(function VideoGrid({
                 onCardClick={handleCardClick}
                 isPremium={isPremium}
                 latencies={latencies}
+          playability={playability}
                 resolution={resolutions[`${group.representative.source}:${group.representative.vod_id}`]}
                 isProbing={isProbing && !resolutions[`${group.representative.source}:${group.representative.vod_id}`]}
               />

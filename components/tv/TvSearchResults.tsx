@@ -43,10 +43,11 @@ interface TvResultRowProps {
   rowIndex: number;
   videos: Video[];
   latencies: Record<string, number>;
+  playability: Record<string, 'playable' | 'dead'>;
   onSelect: (video: Video) => void;
 }
 
-function TvResultRow({ rowIndex, videos, latencies, onSelect }: TvResultRowProps) {
+function TvResultRow({ rowIndex, videos, latencies, playability, onSelect }: TvResultRowProps) {
   const { setItemElement } = useTvFocus();
   const id = `result-${rowIndex}`;
   useRowRegistration(id, rowIndex, videos.length, true);
@@ -71,14 +72,19 @@ function TvResultRow({ rowIndex, videos, latencies, onSelect }: TvResultRowProps
               <span className="text-[13px] text-[#9aa0a6] line-clamp-1 min-w-0 truncate">
                 {video.sourceName || video.source}
               </span>
-              {latencyInfo && (
+              {/* Playability beats latency when they disagree: a source whose
+                  API is fast but whose CDN 404s is worse than a slow one that
+                  actually plays, and the latency number alone hides that. */}
+              {playability[video.source] === 'dead' ? (
+                <span className="text-[13px] flex-shrink-0 text-[#f28b82]">不可播</span>
+              ) : latencyInfo ? (
                 <span
                   className="text-[13px] font-mono flex-shrink-0"
                   style={{ color: latencyInfo.color }}
                 >
                   {latencyInfo.label}
                 </span>
-              )}
+              ) : null}
             </span>
           </button>
         );
@@ -92,10 +98,11 @@ interface TvSearchResultsProps {
   loading: boolean;
   results: Video[];
   latencies: Record<string, number>;
+  playability: Record<string, 'playable' | 'dead'>;
   onBack: () => void;
 }
 
-export function TvSearchResults({ query, loading, results, latencies, onBack }: TvSearchResultsProps) {
+export function TvSearchResults({ query, loading, results, latencies, playability, onBack }: TvSearchResultsProps) {
   const router = useRouter();
 
   const chunks = useMemo(() => {
@@ -127,6 +134,7 @@ export function TvSearchResults({ query, loading, results, latencies, onBack }: 
           rowIndex={index + 1}
           videos={videos}
           latencies={latencies}
+          playability={playability}
           onSelect={handleSelect}
         />
       ))}
