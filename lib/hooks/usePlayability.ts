@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Video } from '@/lib/types';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { settingsStore } from '@/lib/store/settings-store';
+import type { Video, VideoSource } from '@/lib/types';
 
 /** A source with no entry yet is still being checked - that state is derived
  *  from the absence of a result rather than written into it, because writing
@@ -30,15 +31,29 @@ export function usePlayability(results: Video[], enabled: boolean) {
   const [status, setStatus] = useState<Record<string, Playability>>({});
   const checkedRef = useRef(new Set<string>());
 
-  const check = useCallback(async (source: string, id: string) => {
+  const check = useCallback(async (source: string, id: string, config?: VideoSource) => {
     try {
       const res = await fetch('/api/playable', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, source }),
+        body: JSON.stringify({ id, source: config ?? source }),
       });
-      const data = res.ok ? ((await res.json()) as { playable?: boolean }) : null;
-      setStatus((prev) => ({ ...prev, [source]: data?.playable ? 'playable' : 'dead' }));
+      // Only a definitive answer may mark a source dead. Treating any failed
+      // check as "unplayable" turned a single backend bug into every source on
+      // screen being labelled 不可播 - confidently wrong, and worse than
+      // showing nothing at all.
+      if (!res.ok) {
+        checkedRef.current.delete(source);
+        return;
+      }
+
+      const data = (await res.json()) as { playable?: boolean; checked?: boolean };
+      if (data.checked === false) {
+        checkedRef.current.delete(source);
+        return;
+      }
+
+      setStatus((prev) => ({ ...prev, [source]: data.playable ? 'playable' : 'dead' }));
     } catch {
       // A failed probe is not evidence the source is dead - the check itself
       // may have been blocked - so leave it unmarked rather than accusing it.
@@ -49,6 +64,16 @@ export function usePlayability(results: Video[], enabled: boolean) {
       });
       checkedRef.current.delete(source);
     }
+  }, []);
+
+  // Most sources come from the user's subscription and exist only on the
+  // client, so the config has to travel with the request - the server cannot
+  // look them up by id, and trying to was what made every source report as
+  // unplayable. This mirrors what /api/detail already accepts.
+  const sourceById = useMemo(() => {
+    const settings = settingsStore.getSettings();
+    const all: VideoSource[] = [...(settings.sources ?? []), ...(settings.premiumSources ?? [])];
+    return new Map(all.map((item) => [item.id, item]));
   }, []);
 
   useEffect(() => {
@@ -70,14 +95,18 @@ export function usePlayability(results: Video[], enabled: boolean) {
     void (async () => {
       for (let i = 0; i < pending.length; i += CONCURRENCY) {
         if (cancelled) return;
-        await Promise.all(pending.slice(i, i + CONCURRENCY).map((p) => check(p.source, p.id)));
+        await Promise.all(
+          pending.slice(i, i + CONCURRENCY).map((p) =>
+            check(p.source, p.id, sourceById.get(p.source)),
+          ),
+        );
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [results, enabled, check]);
+  }, [results, enabled, check, sourceById]);
 
   return status;
 }
