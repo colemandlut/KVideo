@@ -305,7 +305,7 @@ function TvHomeContent({ query, hasSearched, loading, results, latencies, playab
 
 export function TvHome(props: TvHomeProps) {
   return (
-    <TvFocusProvider>
+    <TvFocusProvider restoreFocus={!props.hasSearched}>
       <TvHomeContent {...props} />
     </TvFocusProvider>
   );
