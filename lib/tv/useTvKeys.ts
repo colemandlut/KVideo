@@ -54,8 +54,15 @@ export function useTvKeys(enabled: boolean) {
     const element = getElement(pos);
     if (!element || element === document.activeElement) return;
 
+    // Also take focus back when it is sitting on some *other* focusable of
+    // ours. Only stepping in when focus was lost entirely was not enough:
+    // after returning from the player the list re-sorts, focus stays on
+    // whichever card the browser left it on, and the highlight ends up on a
+    // different title than the one the model points at. Anything outside this
+    // TV surface is still left alone.
     const active = document.activeElement;
-    if (active === null || active === document.body) {
+    const isOurs = active instanceof HTMLElement && active.classList.contains('tv-focusable');
+    if (active === null || active === document.body || isOurs) {
       element.focus({ preventScroll: true });
       // Bring the page to the highlight rather than leaving them disagreeing.
       // Coming back from the player, focus is restored to a card that may be
