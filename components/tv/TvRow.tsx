@@ -30,13 +30,16 @@ interface TvRowProps {
  * including the element table the refs just populated - so registration and
  * presentation are kept as separate components below.
  */
-function useRowRegistration(id: string, rowIndex: number, length: number) {
+function useRowRegistration(id: string, rowIndex: number, length: number, keys?: string[]) {
   const { registerRow, unregisterRow } = useTvFocus();
+  // Serialised so the effect re-runs when the row's contents change identity,
+  // not merely because a new array was allocated.
+  const keySignature = keys?.join('\u0000');
 
   useEffect(() => {
-    registerRow(id, rowIndex, length);
+    registerRow(id, rowIndex, length, false, keySignature?.split('\u0000'));
     return () => unregisterRow(id);
-  }, [id, rowIndex, length, registerRow, unregisterRow]);
+  }, [id, rowIndex, length, keySignature, registerRow, unregisterRow]);
 }
 
 /** Presentational only: renders one focusable skeleton slot. Registers nothing.
@@ -72,7 +75,15 @@ function TvRowLoaded({ id, rowIndex, title, tagId, tags, contentType, onSelect }
   const { movies } = usePopularMovies(tagId, tags, contentType);
 
   // Still one focusable skeleton slot until the first page arrives.
-  useRowRegistration(id, rowIndex, movies.length > 0 ? movies.length : 1);
+  // Identity per poster, so focus can be put back on the same title after a
+  // return - the row reloads asynchronously and a bare coordinate would land
+  // on whatever happens to occupy that slot.
+  useRowRegistration(
+    id,
+    rowIndex,
+    movies.length > 0 ? movies.length : 1,
+    movies.length > 0 ? movies.map((movie) => `${id}:${movie.id}`) : undefined,
+  );
 
   if (movies.length === 0) {
     return <TvRowSkeletonView title={title} setRef={(el) => setItemElement(id, 0, el)} />;

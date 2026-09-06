@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { canRestoreFocus, clampFocus, findFocusByKey, type TvFocusPos, type TvRowMeta } from './focus-model';
 
 interface RowRegistration {
@@ -160,18 +161,50 @@ export function TvFocusProvider({ children }: { children: React.ReactNode }) {
   // Adjusting state during render is React's documented pattern and the one
   // already used for the clamp; the pending value lives in state rather than a
   // ref because mutating a ref during render is a hard lint error here.
+  // Re-arm whenever the surface changes, not only on mount. Going back to the
+  // home screen from search results is a router.replace on the same page, so
+  // nothing remounts - the restore had already been consumed and the saved
+  // home position was never applied, leaving focus to be clamped up to the
+  // top bar. That was the "returns to the 电影 button" report.
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const surface = `${pathname}?${searchParams.toString()}`;
+  const [restoredSurface, setRestoredSurface] = useState(surface);
   const [pendingRestore, setPendingRestore] = useState<SavedFocus | null>(() => readSavedFocus());
-  if (pendingRestore) {
-    // Prefer the item's own identity: the grid re-sorts as measurements
-    // arrive, so the coordinate that was saved may already point at a
-    // different video. Fall back to the coordinate for lists without keys.
-    const byKey = pendingRestore.key ? findFocusByKey(rows, pendingRestore.key) : null;
-    const target = byKey ?? (canRestoreFocus(rows, pendingRestore.pos) ? pendingRestore.pos : null);
 
-    if (target) {
-      setPosState(target);
+  if (restoredSurface !== surface) {
+    setRestoredSurface(surface);
+    setPendingRestore(readSavedFocus());
+    setAnchorKey(null);
+  }
+  if (pendingRestore) {
+    // Prefer the item's own identity: a list re-sorts as measurements arrive,
+    // so the saved coordinate may already point at a different video.
+    const byKey = pendingRestore.key ? findFocusByKey(rows, pendingRestore.key) : null;
+    const exact = byKey ?? (canRestoreFocus(rows, pendingRestore.pos) ? pendingRestore.pos : null);
+
+    if (exact) {
+      setPosState(exact);
       setAnchorKey(byKey ? pendingRestore.key ?? null : null);
       setPendingRestore(null);
+    } else {
+      // The home screen loads a row only once focus has reached it, and an
+      // unloaded row registers a single skeleton item. So the saved position
+      // can never become valid on its own: the row will not load until focus
+      // arrives, and focus will not arrive until the row loads. Deadlock,
+      // which is why returning to the home screen always landed back on the
+      // top-left button.
+      //
+      // Break it by moving onto the row first, at whatever column exists.
+      // That is what triggers the row to load; the identity lookup above then
+      // finishes the job on a later render, once the row has real items.
+      const row = rows[pendingRestore.pos.rowIndex];
+      if (row && pos.rowIndex !== pendingRestore.pos.rowIndex) {
+        setPosState({
+          rowIndex: pendingRestore.pos.rowIndex,
+          itemIndex: Math.min(pendingRestore.pos.itemIndex, Math.max(0, row.length - 1)),
+        });
+      }
     }
   } else if (anchorKey) {
     // The list can reorder again at any time - restoring once is not enough,
