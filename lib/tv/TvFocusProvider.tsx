@@ -74,6 +74,18 @@ export function TvFocusProvider({ children }: { children: React.ReactNode }) {
   const registry = useRef(new Map<string, RowRegistration>());
   const [rows, setRows] = useState<TvRowMeta[]>([]);
   const [pos, setPosState] = useState<TvFocusPos>({ rowIndex: 0, itemIndex: 0 });
+  /**
+   * Identity of the item focus is meant to be on, when the row provides one.
+   *
+   * Focus follows the item, not the slot. The results grid keeps re-sorting
+   * for several seconds as latency and playability measurements arrive, so a
+   * position fixed at one moment points at a different video shortly after -
+   * which is what made the restore land on the wrong card even though it ran
+   * correctly. Re-resolving on every rows change keeps the highlight on the
+   * same title through any reorder, whether that happens on return or while
+   * the user is simply looking at the list.
+   */
+  const [anchorKey, setAnchorKey] = useState<string | null>(null);
 
   const rebuildRows = useCallback(() => {
     const ordered = [...registry.current.entries()].sort((a, b) => a[1].rowIndex - b[1].rowIndex);
@@ -123,6 +135,7 @@ export function TvFocusProvider({ children }: { children: React.ReactNode }) {
   // one currently at that position.
   const setPos = useCallback((next: TvFocusPos) => {
     setPosState(next);
+    setAnchorKey(rows[next.rowIndex]?.keys?.[next.itemIndex] ?? null);
     try {
       const storageKey = focusStorageKey();
       if (!storageKey) return;
@@ -149,15 +162,24 @@ export function TvFocusProvider({ children }: { children: React.ReactNode }) {
   // ref because mutating a ref during render is a hard lint error here.
   const [pendingRestore, setPendingRestore] = useState<SavedFocus | null>(() => readSavedFocus());
   if (pendingRestore) {
-    // Prefer the element's own identity: the grid re-sorts as measurements
-    // arrive, so the coordinate that was saved may now point at a different
-    // video. Fall back to the coordinate for lists whose items carry no key.
+    // Prefer the item's own identity: the grid re-sorts as measurements
+    // arrive, so the coordinate that was saved may already point at a
+    // different video. Fall back to the coordinate for lists without keys.
     const byKey = pendingRestore.key ? findFocusByKey(rows, pendingRestore.key) : null;
     const target = byKey ?? (canRestoreFocus(rows, pendingRestore.pos) ? pendingRestore.pos : null);
 
     if (target) {
       setPosState(target);
+      setAnchorKey(byKey ? pendingRestore.key ?? null : null);
       setPendingRestore(null);
+    }
+  } else if (anchorKey) {
+    // The list can reorder again at any time - restoring once is not enough,
+    // and that is why focus still ended up on the wrong card after a return.
+    // Keep the position pinned to the item it belongs to.
+    const current = findFocusByKey(rows, anchorKey);
+    if (current && (current.rowIndex !== pos.rowIndex || current.itemIndex !== pos.itemIndex)) {
+      setPosState(current);
     }
   }
 
