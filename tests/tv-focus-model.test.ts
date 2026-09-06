@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { moveFocus, clampFocus, findFirstFocusable, isAtRowEnd, canRestoreFocus } from '@/lib/tv/focus-model';
+import { moveFocus, clampFocus, findFirstFocusable, isAtRowEnd, canRestoreFocus, findFocusByKey } from '@/lib/tv/focus-model';
 import type { TvRowMeta } from '@/lib/tv/focus-model';
 
 const rows: TvRowMeta[] = [
@@ -116,4 +116,31 @@ test('a saved position waits for its row to exist', () => {
 test('the top-left position is restorable as soon as anything registers', () => {
   assert.equal(canRestoreFocus([{ id: 'back', length: 1 }], { rowIndex: 0, itemIndex: 0 }), true);
   assert.equal(canRestoreFocus([], { rowIndex: 0, itemIndex: 0 }), false);
+});
+
+// Restoring focus onto the same card after the grid re-sorts. Saving only a
+// coordinate looked correct in code and failed in practice: the results grid
+// reorders as latency and playability measurements arrive, so {row 3, item 2}
+// addressed a different video on return - the restore ran, and still put the
+// highlight on the wrong card.
+test('focus follows the item, not the slot it used to occupy', () => {
+  const before = [
+    { id: 'back', length: 1 },
+    { id: 'r0', length: 3, keys: ['ikun:1', 'guangsu:2', 'bfzy:3'] },
+  ];
+  assert.deepEqual(findFocusByKey(before, 'bfzy:3'), { rowIndex: 1, itemIndex: 2 });
+
+  // Same videos, re-sorted after the measurements landed.
+  const after = [
+    { id: 'back', length: 1 },
+    { id: 'r0', length: 3, keys: ['guangsu:2', 'bfzy:3', 'ikun:1'] },
+  ];
+  assert.deepEqual(findFocusByKey(after, 'bfzy:3'), { rowIndex: 1, itemIndex: 1 });
+});
+
+test('an item that is gone reports no position, so the caller can fall back', () => {
+  const rows = [{ id: 'r0', length: 2, keys: ['a:1', 'b:2'] }];
+  assert.equal(findFocusByKey(rows, 'missing:9'), null);
+  // Rows without keys never match, rather than matching by accident.
+  assert.equal(findFocusByKey([{ id: 'back', length: 1 }], 'a:1'), null);
 });

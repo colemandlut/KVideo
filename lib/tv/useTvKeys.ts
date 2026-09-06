@@ -57,6 +57,11 @@ export function useTvKeys(enabled: boolean) {
     const active = document.activeElement;
     if (active === null || active === document.body) {
       element.focus({ preventScroll: true });
+      // Bring the page to the highlight rather than leaving them disagreeing.
+      // Coming back from the player, focus is restored to a card that may be
+      // far down the grid while the page is still at the top - the user then
+      // sees the top of the list with no visible highlight anywhere.
+      element.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'auto' });
     }
   }, [enabled, rows, pos, getElement]);
 }
