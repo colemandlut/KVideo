@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { canRestoreFocus, clampFocus, findFocusByKey, type TvFocusPos, type TvRowMeta } from './focus-model';
 
@@ -33,9 +33,19 @@ const TvFocusContext = createContext<TvFocusContextValue | null>(null);
  * would not survive that - the same reason the scroll position is stored
  * rather than held in memory.
  */
-function focusStorageKey(): string {
+/**
+ * Keyed by the surface as React sees it, never by window.location.
+ *
+ * Those two disagree exactly when it matters. Returning to the home screen is
+ * a router.replace, and on the render where React has already switched back,
+ * window.location.search still carries the old ?q= for an instant. Reading the
+ * key from the browser URL therefore looked up the *results* entry, found
+ * nothing, and armed the restore with null - which is why the saved home
+ * position sat intact in storage and was still never applied.
+ */
+function focusStorageKey(surface: string): string {
   if (typeof window === 'undefined') return '';
-  return `kvideo-tv-focus:${window.location.pathname}${window.location.search}`;
+  return `kvideo-tv-focus:${surface}`;
 }
 
 /**
@@ -54,8 +64,8 @@ interface SavedFocus {
   key?: string;
 }
 
-function readSavedFocus(): SavedFocus | null {
-  const key = focusStorageKey();
+function readSavedFocus(surface: string): SavedFocus | null {
+  const key = focusStorageKey(surface);
   if (!key) return null;
   try {
     const raw = window.sessionStorage.getItem(key);
@@ -71,7 +81,23 @@ function readSavedFocus(): SavedFocus | null {
   }
 }
 
-export function TvFocusProvider({ children }: { children: React.ReactNode }) {
+export function TvFocusProvider({
+  children,
+  /**
+   * Remember where focus was and put it back on return.
+   *
+   * Off by default, and deliberately not enabled for the search results:
+   * that list re-sorts continuously as latency and playability measurements
+   * arrive, so pinning focus to a card makes the highlight wander across the
+   * screen on its own. A list that reorders under you should keep the
+   * highlight still; only the home screen, whose rows do not reshuffle, wants
+   * focus carried across a round trip.
+   */
+  restoreFocus = false,
+}: {
+  children: React.ReactNode;
+  restoreFocus?: boolean;
+}) {
   const registry = useRef(new Map<string, RowRegistration>());
   const [rows, setRows] = useState<TvRowMeta[]>([]);
   const [pos, setPosState] = useState<TvFocusPos>({ rowIndex: 0, itemIndex: 0 });
@@ -86,7 +112,6 @@ export function TvFocusProvider({ children }: { children: React.ReactNode }) {
    * same title through any reorder, whether that happens on return or while
    * the user is simply looking at the list.
    */
-  const [anchorKey, setAnchorKey] = useState<string | null>(null);
 
   const rebuildRows = useCallback(() => {
     const ordered = [...registry.current.entries()].sort((a, b) => a[1].rowIndex - b[1].rowIndex);
@@ -132,22 +157,9 @@ export function TvFocusProvider({ children }: { children: React.ReactNode }) {
     return row.elements[target.itemIndex] ?? null;
   }, [orderedIds]);
 
-  // Depends on `rows` so the identity written alongside the coordinate is the
-  // one currently at that position.
   const setPos = useCallback((next: TvFocusPos) => {
     setPosState(next);
-    setAnchorKey(rows[next.rowIndex]?.keys?.[next.itemIndex] ?? null);
-    try {
-      const storageKey = focusStorageKey();
-      if (!storageKey) return;
-      window.sessionStorage.setItem(
-        storageKey,
-        JSON.stringify({ ...next, key: rows[next.rowIndex]?.keys?.[next.itemIndex] }),
-      );
-    } catch {
-      // Storage disabled - focus simply will not be restored on return.
-    }
-  }, [rows]);
+  }, []);
 
   // Restoring waits until the saved coordinate actually addresses something.
   //
@@ -170,34 +182,51 @@ export function TvFocusProvider({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
   const surface = `${pathname}?${searchParams.toString()}`;
   const [restoredSurface, setRestoredSurface] = useState(surface);
-  const [pendingRestore, setPendingRestore] = useState<SavedFocus | null>(() => readSavedFocus());
+  const [pendingRestore, setPendingRestore] = useState<SavedFocus | null>(
+    () => (restoreFocus ? readSavedFocus(surface) : null),
+  );
 
   if (restoredSurface !== surface) {
     setRestoredSurface(surface);
-    setPendingRestore(readSavedFocus());
-    setAnchorKey(null);
-  }
-  if (pendingRestore) {
-    // Prefer the item's own identity: a list re-sorts as measurements arrive,
-    // so the saved coordinate may already point at a different video.
-    const byKey = pendingRestore.key ? findFocusByKey(rows, pendingRestore.key) : null;
-    const exact = byKey ?? (canRestoreFocus(rows, pendingRestore.pos) ? pendingRestore.pos : null);
 
-    if (exact) {
-      setPosState(exact);
-      setAnchorKey(byKey ? pendingRestore.key ?? null : null);
+    if (restoreFocus) {
+      setPendingRestore(readSavedFocus(surface));
+    } else {
+      // A surface that does not restore starts at the top-left rather than
+      // inheriting wherever focus was on the previous one - the provider
+      // outlives the switch between the home screen and the results list.
+      setPendingRestore(null);
+      setPosState({ rowIndex: 0, itemIndex: 0 });
+    }
+  }
+
+  // Retried on every render until it lands, rather than applied once. Coming
+  // back to the home screen tears down the results rows and builds the home
+  // rows, and for a render in between there are no rows at all; a one-shot
+  // restore falls into that gap, the clamp squashes it to {0,0} and commits,
+  // and nothing tries again. That is why focus kept ending up on the top bar
+  // even though the right position had been saved and read back.
+  //
+  // This converges rather than oscillates: once the position matches what the
+  // lookup returns, nothing more is written.
+  if (pendingRestore) {
+    const byKey = pendingRestore.key ? findFocusByKey(rows, pendingRestore.key) : null;
+
+    if (byKey) {
+      if (byKey.rowIndex !== pos.rowIndex || byKey.itemIndex !== pos.itemIndex) {
+        setPosState(byKey);
+      } else {
+        setPendingRestore(null);
+      }
+    } else if (canRestoreFocus(rows, pendingRestore.pos) && !pendingRestore.key) {
+      // No identity to go on - restore the bare coordinate once it is valid.
+      setPosState(pendingRestore.pos);
       setPendingRestore(null);
     } else {
-      // The home screen loads a row only once focus has reached it, and an
-      // unloaded row registers a single skeleton item. So the saved position
-      // can never become valid on its own: the row will not load until focus
-      // arrives, and focus will not arrive until the row loads. Deadlock,
-      // which is why returning to the home screen always landed back on the
-      // top-left button.
-      //
-      // Break it by moving onto the row first, at whatever column exists.
-      // That is what triggers the row to load; the identity lookup above then
-      // finishes the job on a later render, once the row has real items.
+      // The item is not there yet. A home row loads only once focus reaches
+      // it, and an unloaded row registers a single skeleton item, so the row
+      // would never load on its own. Step onto it at whatever column exists;
+      // that triggers the load, and the lookup above finishes the job.
       const row = rows[pendingRestore.pos.rowIndex];
       if (row && pos.rowIndex !== pendingRestore.pos.rowIndex) {
         setPosState({
@@ -205,14 +234,6 @@ export function TvFocusProvider({ children }: { children: React.ReactNode }) {
           itemIndex: Math.min(pendingRestore.pos.itemIndex, Math.max(0, row.length - 1)),
         });
       }
-    }
-  } else if (anchorKey) {
-    // The list can reorder again at any time - restoring once is not enough,
-    // and that is why focus still ended up on the wrong card after a return.
-    // Keep the position pinned to the item it belongs to.
-    const current = findFocusByKey(rows, anchorKey);
-    if (current && (current.rowIndex !== pos.rowIndex || current.itemIndex !== pos.itemIndex)) {
-      setPosState(current);
     }
   }
 
@@ -227,6 +248,29 @@ export function TvFocusProvider({ children }: { children: React.ReactNode }) {
   if (clamped.rowIndex !== pos.rowIndex || clamped.itemIndex !== pos.itemIndex) {
     setPosState(clamped);
   }
+
+  // Persisted from an effect rather than during render: this is a side effect,
+  // and it must reflect the position *after* the clamp and any anchor
+  // correction, not the value that was passed in.
+  const savedRowIndex = clamped.rowIndex;
+  const savedItemIndex = clamped.itemIndex;
+  // Read after the clamp, so the identity matches the position being stored.
+  // Taking it when the key was pressed captured nothing: a row is a skeleton
+  // with no identities for the first moments after focus lands on it.
+  const savedKey = rows[clamped.rowIndex]?.keys?.[clamped.itemIndex];
+  useEffect(() => {
+    if (!restoreFocus) return;
+    try {
+      const storageKey = focusStorageKey(surface);
+      if (!storageKey) return;
+      window.sessionStorage.setItem(
+        storageKey,
+        JSON.stringify({ rowIndex: savedRowIndex, itemIndex: savedItemIndex, key: savedKey }),
+      );
+    } catch {
+      // Storage disabled - focus simply will not be restored on return.
+    }
+  }, [restoreFocus, surface, savedRowIndex, savedItemIndex, savedKey]);
 
   const value = useMemo<TvFocusContextValue>(() => ({
     rows,
