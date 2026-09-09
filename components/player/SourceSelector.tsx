@@ -10,6 +10,7 @@ import Image from 'next/image';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Icons } from '@/components/ui/Icon';
+import { useSourceStreamInfo } from '@/lib/hooks/useSourceStreamInfo';
 import { LatencyBadge } from '@/components/ui/LatencyBadge';
 import { Button } from '@/components/ui/Button';
 
@@ -36,6 +37,14 @@ export function SourceSelector({
 }: SourceSelectorProps) {
     const [isLoading, setIsLoading] = useState(false);
     const [latencies, setLatencies] = useState<Record<string, number>>({});
+
+    // Latency and resolution measured against the stream itself, not the
+    // source's API host - those are different servers, and only the stream can
+    // say what resolution it is.
+    const streamInfo = useSourceStreamInfo(
+        sources.map((s) => ({ source: s.source, id: s.id })),
+        true,
+    );
 
     // Sort sources by latency
     const sortedSources = useMemo(() => {
@@ -121,7 +130,8 @@ export function SourceSelector({
             <div className="space-y-2 max-h-[300px] overflow-y-auto">
                 {sortedSources.map((source, index) => {
                     const isCurrent = source.source === currentSource;
-                    const latency = latencies[source.source] ?? source.latency;
+                    const latency = streamInfo[source.source]?.latency ?? latencies[source.source] ?? source.latency;
+                    const resolution = streamInfo[source.source]?.resolution;
 
                     return (
                         <button
@@ -160,9 +170,18 @@ export function SourceSelector({
                                 <div className="font-medium text-sm sm:text-base truncate">
                                     {source.sourceName || source.source}
                                 </div>
-                                {latency !== undefined && (
-                                    <div className="mt-1">
-                                        <LatencyBadge latency={latency} />
+                                {(latency !== undefined || resolution) && (
+                                    <div className="mt-1 flex items-center gap-2">
+                                        {/* Resolution comes from the stream's own master
+                                            playlist. Sources that serve a media playlist
+                                            declare none, and show none rather than a
+                                            guess - the label exists to be trusted. */}
+                                        {resolution && (
+                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold text-white bg-emerald-600/80">
+                                                {resolution}
+                                            </span>
+                                        )}
+                                        {latency !== undefined && <LatencyBadge latency={latency} />}
                                     </div>
                                 )}
                             </div>

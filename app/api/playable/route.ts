@@ -5,6 +5,7 @@ import { getVideoDetail } from '@/lib/api/client';
 import { getSourceById } from '@/lib/api/video-sources';
 import type { VideoSource } from '@/lib/types';
 import { probeSourceLatency } from '@/lib/api/source-latency';
+import { parsePlaylistResolution } from '@/lib/server/stream-info';
 import { isProbeableUrl } from '@/lib/server/probe-guard';
 
 export const runtime = 'edge';
@@ -53,7 +54,15 @@ export async function POST(request: NextRequest) {
   const sourceConfig =
     typeof source === 'string' ? getSourceById(source) : (source as VideoSource | undefined);
 
-  if (!sourceConfig || typeof sourceConfig !== 'object' || !sourceConfig.baseUrl) {
+  // A subscription entry carries only id/name/baseUrl; the path fields are
+  // filled in when a source is imported. Defaulting them here means a config
+  // that arrives without them builds `baseUrl` rather than `baseUrl` +
+  // "undefined", which fails in a way that looks like the source is down.
+  const resolvedSource = sourceConfig && typeof sourceConfig === 'object'
+    ? { ...sourceConfig, searchPath: sourceConfig.searchPath ?? '', detailPath: sourceConfig.detailPath ?? '' }
+    : sourceConfig;
+
+  if (!resolvedSource || typeof resolvedSource !== 'object' || !resolvedSource.baseUrl) {
     // Not an answer about playability - say so rather than condemning it.
     return NextResponse.json(
       { checked: false, reason: 'unknown-source' },
@@ -62,7 +71,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const detail = await getVideoDetail(id, sourceConfig);
+    const detail = await getVideoDetail(id, resolvedSource);
     const streamUrl = detail?.episodes?.[0]?.url;
 
     // No episode at all is its own kind of unplayable, and worth reporting as
@@ -75,6 +84,26 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await probeSourceLatency(streamUrl);
+
+    // Only an HLS playlist can declare a resolution, and only a master one
+    // actually does. Fetching the body of anything else would mean pulling a
+    // video file down to the edge to learn nothing.
+    let resolution: string | undefined;
+    if (result.success && isPlayableStatus(result.status) && /\.m3u8(\?|$)/i.test(streamUrl)) {
+      try {
+        const playlist = await fetch(streamUrl, {
+          // A playlist is a few KB; the cap is there so a mislabelled URL
+          // cannot stream a whole film through this route.
+          headers: { Range: 'bytes=0-16383' },
+        });
+        if (playlist.ok || playlist.status === 206) {
+          resolution = parsePlaylistResolution(await playlist.text())?.label;
+        }
+      } catch {
+        // Unknown resolution is a normal answer - several sources serve media
+        // playlists that carry none - so a failure here is not an error.
+      }
+    }
 
     // A probe that never got an answer says nothing about the source - the CDN
     // may simply refuse requests from a datacenter. Only a real HTTP status is
@@ -92,6 +121,7 @@ export async function POST(request: NextRequest) {
         playable: isPlayableStatus(result.status),
         status: result.status,
         latency: result.latency,
+        resolution,
       },
       { headers: { 'Cache-Control': 'no-store' } }
     );
