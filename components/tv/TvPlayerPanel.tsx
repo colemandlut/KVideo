@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIsTvLike } from '@/lib/hooks/mobile/useDeviceDetection';
 import { useFavorites } from '@/lib/store/favorites-store';
+import { useSourceStreamInfo } from '@/lib/hooks/useSourceStreamInfo';
 import { clampFocus, moveFocus, type TvDirection, type TvFocusPos, type TvRowMeta } from '@/lib/tv/focus-model';
 import type { SourceInfo } from '@/components/player/EpisodeList';
 
@@ -84,6 +85,10 @@ export function TvPlayerPanel({
   const { favorites, toggleFavorite } = useFavorites(isPremium);
 
   const [isOpen, setIsOpen] = useState(false);
+
+  // Probed only while the panel is open: nobody is looking otherwise, and each
+  // probe is a real request to the source's CDN.
+  const streamInfo = useSourceStreamInfo(sources, isOpen);
   const [pos, setPos] = useState<TvFocusPos>({ rowIndex: 0, itemIndex: 0 });
 
   const favoriteRef = useRef<HTMLButtonElement | null>(null);
@@ -346,7 +351,20 @@ export function TvPlayerPanel({
                   }`}
                   onClick={() => selectAt({ rowIndex: SOURCES_ROW, itemIndex: index })}
                 >
-                  {source.sourceName || source.source}
+                  <span className="block">{source.sourceName || source.source}</span>
+                  {/* Latency and resolution both come from probing the stream
+                      itself. A source that declares no resolution shows none -
+                      several serve a media playlist that carries one nowhere -
+                      rather than a guess, which is what the label exists to
+                      avoid. */}
+                  <span className="mt-0.5 flex items-center justify-center gap-2 text-[12px] font-mono text-white/60">
+                    {streamInfo[source.source]?.resolution && (
+                      <span className="text-emerald-300">{streamInfo[source.source]?.resolution}</span>
+                    )}
+                    {streamInfo[source.source]?.latency !== undefined && (
+                      <span>{streamInfo[source.source]?.latency}ms</span>
+                    )}
+                  </span>
                 </button>
               );
             })}
