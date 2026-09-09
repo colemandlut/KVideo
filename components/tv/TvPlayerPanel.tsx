@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIsTvLike } from '@/lib/hooks/mobile/useDeviceDetection';
 import { useFavorites } from '@/lib/store/favorites-store';
 import { useSourceStreamInfo } from '@/lib/hooks/useSourceStreamInfo';
+import { orderSourcesByLatency } from '@/lib/tv/order-sources';
 import { clampFocus, moveFocus, type TvDirection, type TvFocusPos, type TvRowMeta } from '@/lib/tv/focus-model';
 import type { SourceInfo } from '@/components/player/EpisodeList';
 
@@ -86,9 +87,28 @@ export function TvPlayerPanel({
 
   const [isOpen, setIsOpen] = useState(false);
 
-  // Probed only while the panel is open: nobody is looking otherwise, and each
-  // probe is a real request to the source's CDN.
-  const streamInfo = useSourceStreamInfo(sources, isOpen);
+  // Probed as soon as the page has sources, not only once the panel opens, so
+  // the very first open is already ordered. Results are cached per source, so
+  // this costs one round of requests per video rather than one per open.
+  const streamInfo = useSourceStreamInfo(sources, sources.length > 0);
+
+  /**
+   * Source order, fixed at the moment the panel opens.
+   *
+   * Measurements land over a second or two, and re-sorting while the panel is
+   * on screen would slide the highlight onto a different line under the user's
+   * thumb - the same wandering-focus problem the search results had. Freezing
+   * the order per open keeps it still; a later open picks up whatever has been
+   * measured since.
+   */
+  const [frozenOrder, setFrozenOrder] = useState<SourceInfo[] | null>(null);
+
+  const orderSources = useCallback(
+    (list: SourceInfo[]) => orderSourcesByLatency(list, (item) => streamInfo[item.source]?.latency),
+    [streamInfo],
+  );
+
+  const orderedSources = frozenOrder ?? sources;
   const [pos, setPos] = useState<TvFocusPos>({ rowIndex: 0, itemIndex: 0 });
 
   const favoriteRef = useRef<HTMLButtonElement | null>(null);
@@ -170,8 +190,8 @@ export function TvPlayerPanel({
   const rows = useMemo<TvRowMeta[]>(() => [
     { id: 'favorite', length: favoriteItem ? 1 : 0 },
     { id: 'episodes', length: episodeList.length },
-    { id: 'sources', length: sources.length, keepColumn: false },
-  ], [favoriteItem, episodeList.length, sources.length]);
+    { id: 'sources', length: orderedSources.length, keepColumn: false },
+  ], [favoriteItem, episodeList.length, orderedSources.length]);
 
   const getElement = useCallback((target: TvFocusPos): HTMLButtonElement | null => {
     const row = rows[target.rowIndex];
@@ -197,11 +217,11 @@ export function TvPlayerPanel({
       const episode = episodeList[target.itemIndex];
       if (episode) onEpisodeSelect(episode, target.itemIndex);
     } else if (row.id === 'sources') {
-      const source = sources[target.itemIndex];
+      const source = orderedSources[target.itemIndex];
       if (source) onSourceChange(source);
     }
     setIsOpen(false);
-  }, [rows, episodeList, sources, onEpisodeSelect, onSourceChange, favoriteItem, toggleFavorite]);
+  }, [rows, episodeList, orderedSources, onEpisodeSelect, onSourceChange, favoriteItem, toggleFavorite]);
 
   // Single capture-phase listener. Registered only while this panel is
   // relevant (TV-like devices); phones and desktops never attach it.
@@ -217,6 +237,9 @@ export function TvPlayerPanel({
         event.preventDefault();
         event.stopPropagation();
         setPos(clampFocus(rows, { rowIndex: EPISODES_ROW, itemIndex: currentEpisode }));
+        // Order settled here, once, so it cannot shift under the user while
+        // they are reading it.
+        setFrozenOrder(orderSources(sources));
         setIsOpen(true);
         return;
       }
@@ -227,6 +250,9 @@ export function TvPlayerPanel({
           event.preventDefault();
           event.stopPropagation();
           setIsOpen(false);
+          // Dropped so the next open re-orders with whatever has been measured
+          // in the meantime.
+          setFrozenOrder(null);
           return;
         case 'ArrowUp':
         case 'ArrowDown':
@@ -263,7 +289,7 @@ export function TvPlayerPanel({
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [isTvLike, isOpen, pos, rows, currentEpisode, selectAt]);
+  }, [isTvLike, isOpen, pos, rows, currentEpisode, selectAt, orderSources, sources]);
 
   // Move real DOM focus (and scroll it into view) whenever the panel opens
   // or the position changes. Kept separate from the keydown handler above so
@@ -338,7 +364,7 @@ export function TvPlayerPanel({
         <section>
           <h2 className="tv-row-title text-white/90">线路</h2>
           <div className="tv-row-strip !px-0">
-            {sources.map((source, index) => {
+            {orderedSources.map((source, index) => {
               const isCurrent = source.source === currentSourceId;
               return (
                 <button
